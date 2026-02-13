@@ -71,6 +71,7 @@ var SHAPES = {
 }
 
 const PIECE_QUEUE_SIZE = 3
+const SOLVER_BAG_OVERRIDE_MARGIN = 3
 
 # ==============================================================================
 # [VISUALS] VFX VARIABLES
@@ -653,6 +654,16 @@ func get_next_scripted_piece():
 func is_scripted_level():
 	return not get_level_sequence().is_empty()
 
+func get_best_piece_global():
+	var best_type = ""
+	var best_score = -9999
+	for piece_type in SHAPES.keys():
+		var score = evaluate_piece_potential(SHAPES[piece_type])
+		if score > best_score:
+			best_score = score
+			best_type = piece_type
+	return {"type": best_type, "score": best_score}
+
 func pick_piece_from_bag(prefer_helpful):
 	if piece_bag.is_empty():
 		refill_piece_bag()
@@ -675,7 +686,20 @@ func pick_piece_from_bag(prefer_helpful):
 				selected = piece_type
 				selected_score = score
 
-	piece_bag.erase(selected)
+	# Safety override: if bag constraints would make the run unwinnable,
+	# prefer the globally best piece even if it is outside the current bag.
+	if prefer_helpful:
+		var global_best = get_best_piece_global()
+		if global_best.type != "":
+			var should_override = selected_score < 0
+			if global_best.score - selected_score >= SOLVER_BAG_OVERRIDE_MARGIN:
+				should_override = true
+			if should_override:
+				selected = global_best.type
+				selected_score = global_best.score
+
+	if piece_bag.has(selected):
+		piece_bag.erase(selected)
 	return selected
 
 func ensure_piece_queue():
@@ -712,8 +736,7 @@ func adapt_buffer_after_placement():
 
 	# If Piece A blocked the best line for Piece B, tweak Piece C before it is shown.
 	if score_drop >= 8:
-		var prefer_helpful = lives <= 2
-		var replacement = pick_piece_from_bag(prefer_helpful)
+		var replacement = pick_piece_from_bag(true)
 		if replacement != "":
 			var previous_buffer = piece_queue[1]
 			piece_queue[1] = replacement
