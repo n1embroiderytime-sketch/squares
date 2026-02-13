@@ -650,6 +650,9 @@ func get_next_scripted_piece():
 		return ""
 	return scripted_piece
 
+func is_scripted_level():
+	return not get_level_sequence().is_empty()
+
 func pick_piece_from_bag(prefer_helpful):
 	if piece_bag.is_empty():
 		refill_piece_bag()
@@ -682,6 +685,8 @@ func ensure_piece_queue():
 		if next_piece != "":
 			is_locked = true
 		else:
+			if is_scripted_level():
+				break
 			next_piece = pick_piece_from_bag(true)
 		if next_piece == "":
 			break
@@ -690,6 +695,8 @@ func ensure_piece_queue():
 
 func adapt_buffer_after_placement():
 	# Piece B is at index 0, Piece C (buffer) is index 1.
+	if is_scripted_level():
+		return
 	if piece_queue.size() < 2:
 		return
 	if piece_queue_locked.size() < 2:
