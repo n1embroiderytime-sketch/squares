@@ -43,6 +43,7 @@ var OFFSET_X = 0.0
 @export var game_levels: Array[Resource] = [] # Drag & Drop Levels here in Editor
 @export var meta_target_level_index: int = -1 
 @export var meta_ghost_duration: float = 4.0
+@export var solver_debug_logs: bool = true
 
 # ==============================================================================
 # [VISUALS] COLORS & THEMES
@@ -452,12 +453,14 @@ func spawn_piece():
 
 	ensure_piece_queue()
 	if piece_queue.is_empty():
+		solver_log("queue empty -> evaluate_end_game")
 		evaluate_end_game() # No moves left? Game Over.
 		return
 
 	var next_type = piece_queue.pop_front()
 	if not piece_queue_locked.is_empty():
 		piece_queue_locked.pop_front()
+	solver_log("spawn piece => %s | queue_after_pop=%s" % [next_type, str(piece_queue)])
 		
 	hint_active = false
 	piece_mover.spawn_piece(next_type, SHAPES, COLS)
@@ -649,19 +652,35 @@ func get_next_scripted_piece():
 	sequence_queue_index += 1
 	if not SHAPES.has(scripted_piece):
 		return ""
+	if solver_debug_logs:
+		print("[SOLVER] scripted piece -> ", scripted_piece, " (idx ", sequence_queue_index - 1, ")")
 	return scripted_piece
 
 func is_scripted_level():
 	return not get_level_sequence().is_empty()
 
+func solver_log(msg):
+	if solver_debug_logs:
+		print("[SOLVER] ", msg)
+
+func get_piece_debug_snapshot(piece_type):
+	var matrix = SHAPES[piece_type]
+	var potential = evaluate_piece_potential(matrix)
+	var exact_fit = can_piece_fit_in_multiverse(matrix)
+	return {"type": piece_type, "potential": potential, "exact_fit": exact_fit}
+
 func get_best_piece_global():
 	var best_type = ""
 	var best_score = -9999
 	for piece_type in SHAPES.keys():
+		if not can_piece_fit_in_multiverse(SHAPES[piece_type]):
+			continue
 		var score = evaluate_piece_potential(SHAPES[piece_type])
 		if score > best_score:
 			best_score = score
 			best_type = piece_type
+	if solver_debug_logs:
+		solver_log("global best candidate = %s (score=%s)" % [best_type, str(best_score)])
 	return {"type": best_type, "score": best_score}
 
 func pick_piece_from_bag(prefer_helpful):
@@ -672,11 +691,22 @@ func pick_piece_from_bag(prefer_helpful):
 
 	var candidates = piece_bag.duplicate()
 	candidates.shuffle()
-	var selected = candidates[0]
-	var selected_score = evaluate_piece_potential(SHAPES[selected])
+	var selected = ""
+	var selected_score = -9999
+	var found_valid = false
 
 	for piece_type in candidates:
+		var fits_exact = can_piece_fit_in_multiverse(SHAPES[piece_type])
+		if not fits_exact:
+			if solver_debug_logs:
+				solver_log("bag reject %s (no exact-fit in any core rotation)" % piece_type)
+			continue
 		var score = evaluate_piece_potential(SHAPES[piece_type])
+		if not found_valid:
+			selected = piece_type
+			selected_score = score
+			found_valid = true
+			continue
 		if prefer_helpful:
 			if score > selected_score:
 				selected = piece_type
@@ -698,8 +728,15 @@ func pick_piece_from_bag(prefer_helpful):
 				selected = global_best.type
 				selected_score = global_best.score
 
+	if selected == "":
+		if solver_debug_logs:
+			solver_log("bag pick failed: no exact-fit candidates")
+		return ""
+
 	if piece_bag.has(selected):
 		piece_bag.erase(selected)
+	if solver_debug_logs:
+		solver_log("bag pick => %s (score=%s, helpful=%s, remaining_bag=%s)" % [selected, str(selected_score), str(prefer_helpful), str(piece_bag)])
 	return selected
 
 func ensure_piece_queue():
@@ -716,6 +753,8 @@ func ensure_piece_queue():
 			break
 		piece_queue.append(next_piece)
 		piece_queue_locked.append(is_locked)
+		if solver_debug_logs:
+			solver_log("queue append -> %s (locked=%s) queue=%s" % [next_piece, str(is_locked), str(piece_queue)])
 
 func adapt_buffer_after_placement():
 	# Piece B is at index 0, Piece C (buffer) is index 1.
@@ -733,6 +772,8 @@ func adapt_buffer_after_placement():
 	var next_type = piece_queue[0]
 	var current_score = evaluate_piece_potential(SHAPES[next_type])
 	var score_drop = next_piece_baseline_score - current_score
+	if solver_debug_logs:
+		solver_log("buffer check next=%s baseline=%s current=%s drop=%s" % [next_type, str(next_piece_baseline_score), str(current_score), str(score_drop)])
 
 	# If Piece A blocked the best line for Piece B, tweak Piece C before it is shown.
 	if score_drop >= 8:
@@ -742,6 +783,8 @@ func adapt_buffer_after_placement():
 			piece_queue[1] = replacement
 			piece_bag.append(previous_buffer)
 			piece_bag.shuffle()
+			if solver_debug_logs:
+				solver_log("buffer swap: %s -> %s | queue=%s" % [previous_buffer, replacement, str(piece_queue)])
 
 func get_smart_piece_type():
 	ensure_piece_queue()
