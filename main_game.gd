@@ -70,6 +70,8 @@ var SHAPES = {
 	"Z": [[1, 1, 0], [0, 1, 1]]
 }
 
+const PIECE_QUEUE_SIZE = 3
+
 # ==============================================================================
 # [VISUALS] VFX VARIABLES
 # ==============================================================================
@@ -117,6 +119,9 @@ var hint_active = false
 var hint_target_x = 0
 var hint_target_matrix = [] 
 var hint_ghost_coords = []
+var piece_queue = []
+var piece_bag = []
+var next_piece_baseline_score = -9999
 
 # Visual State
 var flash_intensity = 0.0
@@ -425,6 +430,9 @@ func init_level(idx):
 		tutorial_active = false
 		tutorial_state = "INACTIVE"
 
+	reset_piece_pipeline()
+	ensure_piece_queue()
+
 	spawn_piece()
 	if portal_particles: portal_particles.color = level_theme_color
 	trigger_spawn_burst()
@@ -437,17 +445,23 @@ func get_fall_speed_for_level(lvl):
 
 func spawn_piece():
 	if level_completed or show_results_screen: return
-	
-	# [AI LOGIC] "See The Future" (Replaced Random)
-	var next_type = get_smart_piece_type()
-	if next_type == "":
+
+	ensure_piece_queue()
+	if piece_queue.is_empty():
 		evaluate_end_game() # No moves left? Game Over.
 		return
+
+	var next_type = piece_queue.pop_front()
 		
 	hint_active = false
 	piece_mover.spawn_piece(next_type, SHAPES, COLS)
 	falling_piece = piece_mover.falling_piece
 	lock_timer = piece_mover.lock_timer
+	ensure_piece_queue()
+	if piece_queue.is_empty():
+		next_piece_baseline_score = -9999
+	else:
+		next_piece_baseline_score = evaluate_piece_potential(SHAPES[piece_queue[0]])
 	trigger_spawn_burst()
 	
 	# [TUTORIAL] Reset tutorial state for the next piece
@@ -493,7 +507,8 @@ func land_piece():
 	# [TUTORIAL] Advance to next lesson
 	if tutorial_active:
 		tutorial_piece_count += 1
-	
+
+	adapt_buffer_after_placement()
 	check_victory_100_percent() 
 	spawn_piece()
 	trigger_spawn_burst()
@@ -598,24 +613,73 @@ func calculate_hint_move():
 					hint_ghost_coords.append(Vector2(best_state.x + c, best_state.y + r))
 
 # [AI] "SEE THE FUTURE" LOGIC
+func reset_piece_pipeline():
+	piece_queue.clear()
+	piece_bag.clear()
+	next_piece_baseline_score = -9999
+
+func refill_piece_bag():
+	piece_bag = SHAPES.keys()
+	piece_bag.shuffle()
+
+func pick_piece_from_bag(prefer_helpful):
+	if piece_bag.is_empty():
+		refill_piece_bag()
+	if piece_bag.is_empty():
+		return ""
+
+	var candidates = piece_bag.duplicate()
+	candidates.shuffle()
+	var selected = candidates[0]
+	var selected_score = evaluate_piece_potential(SHAPES[selected])
+
+	for piece_type in candidates:
+		var score = evaluate_piece_potential(SHAPES[piece_type])
+		if prefer_helpful:
+			if score > selected_score:
+				selected = piece_type
+				selected_score = score
+		else:
+			if score < selected_score:
+				selected = piece_type
+				selected_score = score
+
+	piece_bag.erase(selected)
+	return selected
+
+func ensure_piece_queue():
+	while piece_queue.size() < PIECE_QUEUE_SIZE:
+		var next_piece = pick_piece_from_bag(true)
+		if next_piece == "":
+			break
+		piece_queue.append(next_piece)
+
+func adapt_buffer_after_placement():
+	# Piece B is at index 0, Piece C (buffer) is index 1.
+	if piece_queue.size() < 2:
+		return
+	if next_piece_baseline_score <= -9999:
+		return
+
+	var next_type = piece_queue[0]
+	var current_score = evaluate_piece_potential(SHAPES[next_type])
+	var score_drop = next_piece_baseline_score - current_score
+
+	# If Piece A blocked the best line for Piece B, tweak Piece C before it is shown.
+	if score_drop >= 8:
+		var prefer_helpful = lives <= 2
+		var replacement = pick_piece_from_bag(prefer_helpful)
+		if replacement != "":
+			var previous_buffer = piece_queue[1]
+			piece_queue[1] = replacement
+			piece_bag.append(previous_buffer)
+			piece_bag.shuffle()
+
 func get_smart_piece_type():
-	var best_piece = ""
-	var best_score = -9999
-	
-	# Evaluate every possible shape
-	var candidates = SHAPES.keys()
-	candidates.shuffle() # Break ties randomly
-	
-	for type in candidates:
-		var score = evaluate_piece_potential(SHAPES[type])
-		if score > best_score:
-			best_score = score
-			best_piece = type
-			
-	# If no piece works (score is terrible), return "" to trigger Game Over
-	if best_score < -100: return ""
-	
-	return best_piece
+	ensure_piece_queue()
+	if piece_queue.is_empty():
+		return ""
+	return piece_queue[0]
 
 func evaluate_piece_potential(matrix):
 	# Simulate placing this piece in every possible rotation and position
