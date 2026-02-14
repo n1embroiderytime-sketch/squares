@@ -127,6 +127,7 @@ var piece_bag = []
 var next_piece_baseline_score = -9999
 var sequence_queue_index = 0
 var last_spawned_piece_type = ""
+var level_target_piece_map = {}
 
 # Visual State
 var flash_intensity = 0.0
@@ -137,6 +138,16 @@ var meta_ghost_opacity = 0.0
 
 var grid_board = null
 var piece_mover = null
+
+const PIECE_COLORS = {
+	"T": Color("ff3b30"),
+	"I": Color("34c759"),
+	"S": Color("ffd60a"),
+	"Z": Color("0a84ff"),
+	"J": Color("ff2dce"),
+	"L": Color("ffffff"),
+	"O": Color("e5e5e5")
+}
 
 # ==============================================================================
 # [SYSTEM] INPUT VARIABLES
@@ -437,6 +448,11 @@ func init_level(idx):
 	var level_data = game_levels[idx]
 	grid_board.set_targets_from_level(level_data)
 	current_level_targets = grid_board.current_level_targets
+	var typed_map = level_data.get("target_piece_map")
+	if typed_map == null:
+		level_target_piece_map = {}
+	else:
+		level_target_piece_map = typed_map.duplicate(true)
 	
 	# [TUTORIAL CHECK] If Level 0, start tutorial
 	if level_index == 0:
@@ -500,6 +516,7 @@ func land_piece():
 	if not grid_board.piece_is_connected(falling_piece.x, gy, falling_piece.matrix): handle_rejection(); return
 	if gy < 0: handle_rejection(); return
 	if not grid_board.piece_fits_targets(falling_piece.x, gy, falling_piece.matrix): handle_rejection(); return
+	if not piece_matches_target_color_map(falling_piece.x, gy, falling_piece.matrix, falling_piece.type): handle_rejection(); return
 
 	# 2. SUCCESS: Place the blocks
 	last_placed_coords = grid_board.commit_piece(falling_piece.x, gy, falling_piece.matrix)
@@ -609,8 +626,12 @@ func calculate_hint_move():
 							if sim_matrix[row][col] == 1:
 								var rel_x = (x + col) - CENTER_X
 								var rel_y = (gy + row) - CENTER_Y
-								for t in current_level_targets:
-									if t.x == rel_x and t.y == rel_y: current_score += 1
+								var required_piece = get_required_piece_for_target(rel_x, rel_y)
+								if required_piece == "" or required_piece == falling_piece.type:
+									for t in current_level_targets:
+										if t.x == rel_x and t.y == rel_y: current_score += 1
+								else:
+									current_score -= 5
 					if current_score > best_score:
 						best_score = current_score
 						best_state = { "x": x, "y": gy, "rot": r, "matrix": sim_matrix }
@@ -1012,6 +1033,7 @@ func rotate_core(dir):
 
 	cluster = grid_board.cluster
 	current_level_targets = grid_board.current_level_targets
+	rotate_target_piece_map(dir)
 
 	if hint_active: calculate_hint_move()
 
@@ -1022,6 +1044,50 @@ func rotate_core(dir):
 	var tween = create_tween()
 	tween.tween_property(self, "visual_core_rotation", 0.0, 0.2).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	check_victory_100_percent()
+
+func _target_key(rel_x, rel_y):
+	return str(int(rel_x)) + "," + str(int(rel_y))
+
+func get_required_piece_for_target(rel_x, rel_y):
+	return level_target_piece_map.get(_target_key(rel_x, rel_y), "")
+
+func get_piece_color(piece_type):
+	return PIECE_COLORS.get(piece_type, COLOR_TARGET)
+
+func piece_matches_target_color_map(piece_x, piece_y, matrix, piece_type):
+	if level_target_piece_map.is_empty():
+		return true
+	for r in range(matrix.size()):
+		for c in range(matrix[r].size()):
+			if matrix[r][c] == 1:
+				var rel_x = (piece_x + c) - CENTER_X
+				var rel_y = (piece_y + r) - CENTER_Y
+				var required_piece = get_required_piece_for_target(rel_x, rel_y)
+				if required_piece != "" and required_piece != piece_type:
+					return false
+	return true
+
+func rotate_target_piece_map(dir):
+	if level_target_piece_map.is_empty():
+		return
+	var rotated = {}
+	for key in level_target_piece_map.keys():
+		var piece_type = level_target_piece_map[key]
+		var parts = str(key).split(",")
+		if parts.size() < 2:
+			continue
+		var x = int(parts[0])
+		var y = int(parts[1])
+		var nx
+		var ny
+		if dir == 1:
+			nx = -y - 1
+			ny = x
+		else:
+			nx = y
+			ny = -x - 1
+		rotated[_target_key(nx, ny)] = piece_type
+	level_target_piece_map = rotated
 
 func spawn_impact_particles(pos):
 	var particles = CPUParticles2D.new()
@@ -1270,8 +1336,12 @@ func _draw():
 			var offset = 5
 			var size = GRID_SIZE - (offset * 2)
 			var rect = Rect2(gx + offset, gy + offset, size, size)
-			draw_rect(rect, COLOR_TARGET, false, 4.0) 
-			draw_rect(rect, Color(COLOR_TARGET.r, COLOR_TARGET.g, COLOR_TARGET.b, 0.1), true)
+			var required_piece = get_required_piece_for_target(t.x, t.y)
+			var target_col = COLOR_TARGET
+			if required_piece != "":
+				target_col = get_piece_color(required_piece)
+			draw_rect(rect, target_col, false, 4.0) 
+			draw_rect(rect, Color(target_col.r, target_col.g, target_col.b, 0.1), true)
 	
 	# Placed Blocks
 	for b in cluster:
