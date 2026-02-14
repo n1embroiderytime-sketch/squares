@@ -13,7 +13,11 @@ var game_levels = [
 # --- GAME STATE ---
 var highest_level_reached = 0
 var selected_level = 0
-var level_stars = {} # <--- NEW: Stores { level_index: star_count }
+var level_stars = {}
+
+# Endless progression
+var endless_high_score = 0
+var endless_current_score = 0
 
 const SAVE_PATH = "user://lookmom_save.json"
 
@@ -23,15 +27,18 @@ func _ready():
 func save_game():
 	var data = {
 		"highest_level_reached": highest_level_reached,
-		"level_stars": level_stars # <--- NEW: Save stars
+		"level_stars": level_stars,
+		"endless_high_score": endless_high_score,
+		"endless_current_score": endless_current_score
 	}
-	
+
 	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(data))
 
 func load_game():
-	if not FileAccess.file_exists(SAVE_PATH): return
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
 
 	var file = FileAccess.open(SAVE_PATH, FileAccess.READ)
 	if file:
@@ -41,7 +48,10 @@ func load_game():
 			var data = json.get_data()
 			if "highest_level_reached" in data:
 				highest_level_reached = int(data["highest_level_reached"])
-			if "level_stars" in data: # <--- NEW: Load stars
-				# Convert keys back to ints because JSON keys are always strings
+			if "level_stars" in data:
 				for key in data["level_stars"]:
 					level_stars[int(key)] = int(data["level_stars"][key])
+			if "endless_high_score" in data:
+				endless_high_score = int(data["endless_high_score"])
+			if "endless_current_score" in data:
+				endless_current_score = int(data["endless_current_score"])
