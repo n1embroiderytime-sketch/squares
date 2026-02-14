@@ -121,6 +121,7 @@ var hint_active = false
 var hint_target_x = 0
 var hint_target_matrix = [] 
 var hint_ghost_coords = []
+var hint_rotate_core = false
 var piece_queue = []
 var piece_queue_locked = []
 var piece_bag = []
@@ -146,7 +147,7 @@ const PIECE_COLORS = {
 	"Z": Color("0a84ff"),
 	"J": Color("ff2dce"),
 	"L": Color("ffffff"),
-	"O": Color("e5e5e5")
+	"O": Color("00ffff")
 }
 
 # ==============================================================================
@@ -491,6 +492,7 @@ func spawn_piece():
 	solver_log("spawn piece => %s | queue_after_pop=%s" % [next_type, str(piece_queue)])
 		
 	hint_active = false
+	hint_rotate_core = false
 	last_spawned_piece_type = next_type
 	piece_mover.spawn_piece(next_type, SHAPES, COLS)
 	falling_piece = piece_mover.falling_piece
@@ -604,6 +606,7 @@ func handle_rejection():
 func calculate_hint_move():
 	# Simple AI to find a valid spot
 	hint_ghost_coords.clear()
+	hint_rotate_core = false
 	if falling_piece == null: return
 	var best_score = -1
 	var best_state = {}
@@ -645,6 +648,11 @@ func calculate_hint_move():
 			for c in range(m[r].size()):
 				if m[r][c] == 1:
 					hint_ghost_coords.append(Vector2(best_state.x + c, best_state.y + r))
+	else:
+		# No valid placement in current rotation; suggest rotating the core
+		# if this piece can fit in another world orientation.
+		if can_piece_fit_in_multiverse(falling_piece.matrix):
+			hint_rotate_core = true
 
 # [AI] "SEE THE FUTURE" LOGIC
 func reset_piece_pipeline():
@@ -1336,12 +1344,8 @@ func _draw():
 			var offset = 5
 			var size = GRID_SIZE - (offset * 2)
 			var rect = Rect2(gx + offset, gy + offset, size, size)
-			var required_piece = get_required_piece_for_target(t.x, t.y)
-			var target_col = COLOR_TARGET
-			if required_piece != "":
-				target_col = get_piece_color(required_piece)
-			draw_rect(rect, target_col, false, 4.0) 
-			draw_rect(rect, Color(target_col.r, target_col.g, target_col.b, 0.1), true)
+			draw_rect(rect, COLOR_TARGET, false, 4.0) 
+			draw_rect(rect, Color(COLOR_TARGET.r, COLOR_TARGET.g, COLOR_TARGET.b, 0.1), true)
 	
 	# Placed Blocks
 	for b in cluster:
@@ -1359,6 +1363,12 @@ func _draw():
 			var draw_y = coord.y * GRID_SIZE
 			draw_rect(Rect2(draw_x, draw_y, GRID_SIZE, GRID_SIZE), Color(dynamic_ghost_col.r, dynamic_ghost_col.g, dynamic_ghost_col.b, 0.3), true)
 			draw_rect(Rect2(draw_x, draw_y, GRID_SIZE, GRID_SIZE), dynamic_ghost_col, false, 2.0)
+
+	if hint_active and hint_rotate_core and hint_ghost_coords.is_empty() and control_mode == "PIECE":
+		var hint_font = custom_font if custom_font else ThemeDB.fallback_font
+		var hint_text = "HINT: ROTATE CORE"
+		var hint_pos = Vector2(20, (CENTER_Y * GRID_SIZE) + (GRID_SIZE * 5))
+		draw_string(hint_font, hint_pos, hint_text, HORIZONTAL_ALIGNMENT_CENTER, vp_size.x - 40, 24, Color("81a1c1"))
 
 	# 6. Draw Falling Piece + Ghost Projection
 	if falling_piece != null:
