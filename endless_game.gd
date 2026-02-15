@@ -19,33 +19,55 @@ var is_resetting = false
 # [VISUALS] Debug line toggle (False = Hide, True = Show Gold Line)
 var show_debug_lines = true 
 
-@onready var camera = $Camera2D
+var camera = null
+var autosave_elapsed = 0.0
+const ENDLESS_AUTOSAVE_INTERVAL = 15.0
 
 func _ready():
 	randomize()
+	var vp_size = get_viewport_rect().size
+	COLS = floor(vp_size.x / GRID_SIZE)
+	ROWS = floor(vp_size.y / GRID_SIZE)
+	CENTER_X = floor(COLS / 2)
+	CENTER_Y = floor(ROWS * 0.65)
+	OFFSET_X = (vp_size.x - (COLS * GRID_SIZE)) / 2
+	sfx_connect = $SfxConnect
+
+	grid_board = GridBoardScript.new()
+	add_child(grid_board)
+	grid_board.configure(COLS, ROWS, CENTER_X, CENTER_Y)
+	piece_mover = PieceMoverScript.new()
+	add_child(piece_mover)
+
 	score = 0
 	visual_score = 0.0
 	lives = 0 # UI Trick: Hides hearts in parent draw function
-	
-	level_index = 999 
+	level_index = 999
 	control_mode = "PIECE"
-	
+	level_target_piece_map = {}
+	camera = get_node_or_null("Camera2D")
+
 	if ResourceLoader.exists(FONT_PATH):
 		custom_font = load(FONT_PATH)
-	
+
 	spawn_portal_particles()
-	
+
 	cluster = [
-		{"x": -1, "y": -1, "is_gold": true, "is_starting_core": true}, 
-		{"x": 0, "y": -1, "is_gold": true, "is_starting_core": true}, 
-		{"x": -1, "y": 0, "is_gold": true, "is_starting_core": true}, 
+		{"x": -1, "y": -1, "is_gold": true, "is_starting_core": true},
+		{"x": 0, "y": -1, "is_gold": true, "is_starting_core": true},
+		{"x": -1, "y": 0, "is_gold": true, "is_starting_core": true},
 		{"x": 0, "y": 0, "is_gold": true, "is_starting_core": true}
 	]
-	current_level_targets = [] 
+	grid_board.cluster = cluster
+	current_level_targets = []
+	grid_board.current_level_targets = []
 	level_theme_color = THEME_COLORS.pick_random()
-	
-	trigger_spawn_burst() 
+
+	reset_piece_pipeline()
+	ensure_piece_queue()
+	trigger_spawn_burst()
 	spawn_piece()
+	commit_endless_progress(true)
 
 # --- PROCEDURAL TEXTURE GENERATION ---
 # 64x64 Texture with 6px Border
@@ -129,27 +151,67 @@ func spawn_floating_text(pos, value):
 	t.tween_property(label, "modulate:a", 0.0, 0.8).set_ease(Tween.EASE_IN)
 	t.chain().tween_callback(label.queue_free)
 
+
+func ensure_piece_queue():
+	while piece_queue.size() < PIECE_QUEUE_SIZE:
+		if piece_bag.is_empty():
+			refill_piece_bag()
+		if piece_bag.is_empty():
+			break
+		var next_piece = piece_bag.pop_front()
+		piece_queue.append(next_piece)
+		piece_queue_locked.append(false)
+
+func commit_endless_progress(force_save := false):
+	var current_score_int = max(0, int(score))
+	Global.endless_current_score = current_score_int
+	if current_score_int > Global.endless_high_score:
+		Global.endless_high_score = current_score_int
+		force_save = true
+	if force_save:
+		Global.save_game()
+
 func _input(event):
-	if is_resetting: return 
+	if is_resetting:
+		return
+
+	if is_game_paused and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if btn_p_resume.has_point(event.position):
+			toggle_pause()
+			return
+		elif btn_p_levels.has_point(event.position):
+			commit_endless_progress(true)
+			is_game_paused = false
+			get_tree().change_scene_to_file("res://level_select.tscn")
+			return
+		elif btn_p_settings.has_point(event.position):
+			return
+
 	super._input(event)
-	
+
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var vp_size = get_viewport_rect().size
-		var pause_rect = Rect2(vp_size.x - 70, 10, 60, 60) 
+		var pause_rect = Rect2(vp_size.x - 70, 10, 60, 60)
 		if pause_rect.has_point(event.position):
-			# print("Pause Clicked")
-			pass
+			toggle_pause()
+			commit_endless_progress(true)
 
 func _process(delta):
 	super._process(delta)
 	if camera:
 		var target_zoom = current_base_zoom
 		camera.zoom = camera.zoom.lerp(Vector2(target_zoom, target_zoom), 2.0 * delta)
-	
+
 	if abs(visual_score - score) > 0.1:
 		visual_score = lerp(visual_score, float(score), 10.0 * delta)
 	else:
 		visual_score = float(score)
+
+	if not is_game_paused and not is_resetting:
+		autosave_elapsed += delta
+		if autosave_elapsed >= ENDLESS_AUTOSAVE_INTERVAL:
+			autosave_elapsed = 0.0
+			commit_endless_progress(true)
 
 # --- SCENARIO C: TOTAL MISS (BOTTOM/COLLISION) ---
 func handle_rejection():
@@ -202,6 +264,7 @@ func land_piece():
 				
 				if inside_x and inside_y:
 					cluster.append({ "x": final_x, "y": final_y, "is_gold": false, "is_starting_core": false })
+					grid_board.cluster = cluster
 					blocks_added_count += 1
 					# Add floating text for block placement if desired, or keep it for the bonus
 				else:
@@ -214,6 +277,7 @@ func land_piece():
 		trigger_vfx("SUCCESS")
 		score += 100 
 		trigger_score_pulse() # <-- Pulse Effect
+		commit_endless_progress()
 		# Spawn floating text at the center of the piece roughly
 		var vp_s = get_viewport_rect().size
 		spawn_floating_text(Vector2(vp_s.x/2.0, (falling_piece.y * GRID_SIZE) + 100), 100) 
@@ -269,6 +333,7 @@ func check_gold_squares():
 	if newly_gold: 
 		trigger_vfx("GOLD_COMPLETE")
 		trigger_score_pulse() # <-- Pulse Effect
+		commit_endless_progress()
 
 func get_block_at_rel(rx, ry):
 	for b in cluster:
@@ -276,6 +341,8 @@ func get_block_at_rel(rx, ry):
 	return null
 
 func rotate_core(dir):
+	grid_board.cluster = cluster
+
 	if is_resetting or level_completed or show_results_screen: return
 	var new_cluster = []
 	for b in cluster:
@@ -284,6 +351,7 @@ func rotate_core(dir):
 		else: nx = b.y; ny = -b.x - 1
 		new_cluster.append({"x": nx, "y": ny, "is_gold": b.get("is_gold", false), "is_starting_core": b.get("is_starting_core", false)})
 	cluster = new_cluster
+	grid_board.cluster = cluster
 	if dir == 1: visual_core_rotation = -90.0
 	else: visual_core_rotation = 90.0
 	var tween = create_tween()
@@ -328,7 +396,7 @@ func trigger_prestige():
 			queue_redraw()
 			await get_tree().create_timer(0.2).timeout
 	shake_intensity = 20.0; flash_intensity = 0.8; flash_color = COLOR_GOLD 
-	current_base_zoom = 1.0; is_resetting = false; spawn_piece()
+	current_base_zoom = 1.0; is_resetting = false; grid_board.cluster = cluster; spawn_piece()
 	trigger_spawn_burst()
 
 func simulate_drop(start_x, matrix, test_cluster, test_targets):
@@ -492,6 +560,9 @@ func _draw():
 	
 	if flash_intensity > 0:
 		draw_rect(Rect2(0, 0, vp_size.x, vp_size.y), Color(flash_color.r, flash_color.g, flash_color.b, flash_intensity), true)
+	if is_game_paused:
+		draw_pause_menu(vp_size)
+
 	if show_results_screen: pass
 
 # --- [UI] LEFT-ALIGNED SCOREBOARD WITH PULSE ---
@@ -533,3 +604,7 @@ func trigger_vfx(type):
 	if type == "GOLD_COMPLETE":
 		shake_intensity = 20.0; flash_intensity = 0.5; flash_color = COLOR_GOLD
 		if sfx_connect: sfx_connect.play()
+
+func _notification(what):
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		commit_endless_progress(true)

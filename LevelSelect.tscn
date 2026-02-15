@@ -104,12 +104,15 @@ text = "CLASSIC"
 
 [node name="ContainerClassic" type="ScrollContainer" parent="MainMargin/LayoutList/SectionClassic"]
 layout_mode = 2
-horizontal_scroll_mode = 2
-vertical_scroll_mode = 0
+custom_minimum_size = Vector2(0, 340)
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 
-[node name="LevelRow" type="HBoxContainer" parent="MainMargin/LayoutList/SectionClassic/ContainerClassic"]
+[node name="LevelRow" type="GridContainer" parent="MainMargin/LayoutList/SectionClassic/ContainerClassic"]
 layout_mode = 2
-theme_override_constants/separation = 20
+columns = 3
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 20
 
 [node name="SectionMirror" type="VBoxContainer" parent="MainMargin/LayoutList"]
 layout_mode = 2

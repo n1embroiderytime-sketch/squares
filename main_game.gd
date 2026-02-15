@@ -1,5 +1,8 @@
 extends Node2D
 
+const GridBoardScript = preload("res://GridBoard.gd")
+const PieceMoverScript = preload("res://PieceMover.gd")
+
 # ==============================================================================
 # [SYSTEM] TUTORIAL VARIABLES
 # ==============================================================================
@@ -7,7 +10,7 @@ extends Node2D
 var tutorial_active = false
 # Current state of the tutorial lesson (INACTIVE, WAITING, or SHOWING)
 var tutorial_state = "INACTIVE" 
-# Which lesson are we on? (0 = Move, 1 = Rotate, 2 = Switch/Core)
+# Which lesson are we on? (0 = Move, 1 = Rotate Piece, 2 = Switch + Rotate Core)
 var tutorial_piece_count = 0 
 # Timer to animate the hand icon
 var tutorial_hand_animation_timer = 0.0
@@ -28,11 +31,11 @@ const STAR_THRESHOLD_2 = 0.80     # 80% completion = 3 Stars
 const LOCK_DELAY_TIME = 0.5       # Time (seconds) before a piece locks in place
 
 # Automatic Grid Calculation (Don't touch these)
-@onready var COLS = floor(get_viewport_rect().size.x / GRID_SIZE)
-@onready var ROWS = floor(get_viewport_rect().size.y / GRID_SIZE)
-@onready var CENTER_X = floor(COLS / 2)
-@onready var CENTER_Y = floor(ROWS * 0.65)
-@onready var OFFSET_X = (get_viewport_rect().size.x - (COLS * GRID_SIZE)) / 2
+var COLS = 0
+var ROWS = 0
+var CENTER_X = 0
+var CENTER_Y = 0
+var OFFSET_X = 0.0
 
 # ==============================================================================
 # [SYSTEM] EXPORT VARIABLES (Editor Settings)
@@ -40,6 +43,7 @@ const LOCK_DELAY_TIME = 0.5       # Time (seconds) before a piece locks in place
 @export var game_levels: Array[Resource] = [] # Drag & Drop Levels here in Editor
 @export var meta_target_level_index: int = -1 
 @export var meta_ghost_duration: float = 4.0
+@export var solver_debug_logs: bool = false
 
 # ==============================================================================
 # [VISUALS] COLORS & THEMES
@@ -66,6 +70,9 @@ var SHAPES = {
 	"S": [[0, 1, 1], [1, 1, 0]], 
 	"Z": [[1, 1, 0], [0, 1, 1]]
 }
+
+const PIECE_QUEUE_SIZE = 3
+const SOLVER_BAG_OVERRIDE_MARGIN = 3
 
 # ==============================================================================
 # [VISUALS] VFX VARIABLES
@@ -114,6 +121,14 @@ var hint_active = false
 var hint_target_x = 0
 var hint_target_matrix = [] 
 var hint_ghost_coords = []
+var hint_rotate_core = false
+var piece_queue = []
+var piece_queue_locked = []
+var piece_bag = []
+var next_piece_baseline_score = -9999
+var sequence_queue_index = 0
+var last_spawned_piece_type = ""
+var level_target_piece_map = {}
 
 # Visual State
 var flash_intensity = 0.0
@@ -121,6 +136,19 @@ var flash_color = Color.WHITE
 var level_completed = false
 var visual_core_rotation = 0.0   # Current rotation angle (for smooth animation)
 var meta_ghost_opacity = 0.0
+
+var grid_board = null
+var piece_mover = null
+
+const PIECE_COLORS = {
+	"T": Color("ff3b30"),
+	"I": Color("34c759"),
+	"S": Color("ffd60a"),
+	"Z": Color("0a84ff"),
+	"J": Color("ff2dce"),
+	"L": Color("ffffff"),
+	"O": Color("00ffff")
+}
 
 # ==============================================================================
 # [SYSTEM] INPUT VARIABLES
@@ -133,7 +161,7 @@ var core_touch_zone = Rect2()
 var lock_timer = 0.0 
 
 # Audio Node
-@onready var sfx_connect = $SfxConnect
+var sfx_connect = null
 
 # UI Button Areas (Calculated in _draw)
 var btn_pause_rect = Rect2() 
@@ -150,6 +178,20 @@ var btn_p_settings = Rect2()
 # GODOT LIFECYCLE FUNCTIONS
 # ==============================================================================
 func _ready():
+	var vp_size = get_viewport_rect().size
+	COLS = floor(vp_size.x / GRID_SIZE)
+	ROWS = floor(vp_size.y / GRID_SIZE)
+	CENTER_X = floor(COLS / 2)
+	CENTER_Y = floor(ROWS * 0.65)
+	OFFSET_X = (vp_size.x - (COLS * GRID_SIZE)) / 2
+	sfx_connect = $SfxConnect
+
+	grid_board = GridBoardScript.new()
+	add_child(grid_board)
+	grid_board.configure(COLS, ROWS, CENTER_X, CENTER_Y)
+	piece_mover = PieceMoverScript.new()
+	add_child(piece_mover)
+
 	# Load font if it exists
 	if ResourceLoader.exists(FONT_PATH):
 		custom_font = load(FONT_PATH)
@@ -216,19 +258,12 @@ func _process(delta):
 	# --- GRAVITY LOGIC ---
 	# Move piece down if it exists and we aren't hard dropping
 	if falling_piece != null and not is_hard_dropping and not show_results_screen:
-		var move_amount = current_fall_speed * delta 
-		
-		# Check if moving down would hit something
-		if will_collide(falling_piece.x, falling_piece.y + move_amount, falling_piece.matrix):
-			lock_timer += delta
-			# If stuck for too long, lock it in place
-			if lock_timer > LOCK_DELAY_TIME:
-				falling_piece.y = round(falling_piece.y)
-				land_piece()
-		else:
-			# Move down safely
-			falling_piece.y += move_amount
-			lock_timer = 0.0 
+		var colliding = piece_mover.gravity_step(delta, current_fall_speed, grid_board)
+		lock_timer = piece_mover.lock_timer
+		falling_piece = piece_mover.falling_piece
+		if colliding and piece_mover.should_lock(LOCK_DELAY_TIME):
+			falling_piece.y = round(falling_piece.y)
+			land_piece()
 
 # ==============================================================================
 # INPUT HANDLING
@@ -327,37 +362,42 @@ func handle_move(dir):
 	
 	# [TUTORIAL] Unlock if player follows "Move" instruction
 	if tutorial_active and tutorial_state == "SHOWING_PROMPT" and tutorial_piece_count == 0:
-		tutorial_state = "INACTIVE" # Resume gravity
+		tutorial_piece_count = 1
+		tutorial_state = "WAITING_FOR_VIEW"
+		tutorial_hand_animation_timer = 0.0
 	
-	var new_x = falling_piece.x + dir
-	if not will_collide(new_x, floor(falling_piece.y), falling_piece.matrix):
-		falling_piece.x = new_x
-		lock_timer = 0.0 
+	if piece_mover.move_horizontal(dir, grid_board):
+		falling_piece = piece_mover.falling_piece
+		lock_timer = piece_mover.lock_timer
 
 func handle_rotate(dir):
 	# [TUTORIAL] Unlock if player follows "Rotate" instruction
 	if tutorial_active and tutorial_state == "SHOWING_PROMPT" and tutorial_piece_count == 1:
-		tutorial_state = "INACTIVE"
+		tutorial_piece_count = 2
+		tutorial_state = "WAITING_FOR_VIEW"
+		tutorial_hand_animation_timer = 0.0
 		
 	# [TUTORIAL] Unlock if player rotates CORE (Step 3)
 	if tutorial_active and tutorial_state == "SHOWING_PROMPT" and tutorial_piece_count == 2:
 		if control_mode == "CORE":
+			tutorial_piece_count = 3
 			tutorial_state = "INACTIVE"
+			tutorial_active = false
 		else:
 			return # Block rotation if they haven't switched to Core yet
 
-	if control_mode == "CORE": rotate_core(dir)
-	else: 
-		# Rotate the piece matrix
-		var m = falling_piece.matrix
-		var new_m = rotate_matrix_data(m)
-		if dir == -1: # Counter-clockwise is just 3 clockwise rotations
-			new_m = rotate_matrix_data(rotate_matrix_data(rotate_matrix_data(m)))
-		if not will_collide(falling_piece.x, floor(falling_piece.y), new_m): 
-			falling_piece.matrix = new_m
-			lock_timer = 0.0 
+	if control_mode == "CORE":
+		rotate_core(dir)
+	else:
+		if piece_mover.rotate_piece(dir, grid_board):
+			falling_piece = piece_mover.falling_piece
+			lock_timer = piece_mover.lock_timer
 
 func switch_control():
+	# During first two lessons, block Core switch entirely.
+	if tutorial_active and tutorial_piece_count < 2:
+		return
+
 	# [TUTORIAL] Handle "Switch" instruction
 	if tutorial_active and tutorial_state == "SHOWING_PROMPT" and tutorial_piece_count == 2:
 		if control_mode == "PIECE":
@@ -365,8 +405,10 @@ func switch_control():
 			control_mode = "CORE"
 			return
 
-	if control_mode == "PIECE": control_mode = "CORE"
-	else: control_mode = "PIECE"
+	if control_mode == "PIECE":
+		control_mode = "CORE"
+	else:
+		control_mode = "PIECE"
 
 # ==============================================================================
 # CORE GAME LOOP
@@ -381,6 +423,8 @@ func init_level(idx):
 	position = Vector2.ZERO
 	level_index = idx
 	sequence_index = 0
+	sequence_queue_index = 0
+	last_spawned_piece_type = ""
 	lives = 3 
 	hint_active = false
 	level_completed = false
@@ -396,15 +440,20 @@ func init_level(idx):
 	current_fall_speed = get_fall_speed_for_level(idx)
 	
 	# Create the starting Core (4 blocks in center)
-	cluster = [{"x": -1, "y": -1}, {"x": 0, "y": -1}, {"x": -1, "y": 0}, {"x": 0, "y": 0}]
+	grid_board.reset_core()
+	cluster = grid_board.cluster
 	meta_ghost_opacity = meta_ghost_duration
 	level_theme_color = THEME_COLORS.pick_random()
 	
 	# Load targets from Level Resource
 	var level_data = game_levels[idx]
-	current_level_targets = []
-	for t in level_data.target_slots:
-		current_level_targets.append({"x": t.x, "y": t.y})
+	grid_board.set_targets_from_level(level_data)
+	current_level_targets = grid_board.current_level_targets
+	var typed_map = level_data.get("target_piece_map")
+	if typed_map == null:
+		level_target_piece_map = {}
+	else:
+		level_target_piece_map = typed_map.duplicate(true)
 	
 	# [TUTORIAL CHECK] If Level 0, start tutorial
 	if level_index == 0:
@@ -415,30 +464,40 @@ func init_level(idx):
 		tutorial_active = false
 		tutorial_state = "INACTIVE"
 
+	reset_piece_pipeline()
+	ensure_piece_queue()
+
 	spawn_piece()
 	if portal_particles: portal_particles.color = level_theme_color
 	trigger_spawn_burst()
 
 # Difficulty Curve Formula
 func get_fall_speed_for_level(lvl):
-	if lvl < 5: return 2.0 
-	else: return 2.0 + ((lvl - 5) * 0.2)
+	if lvl < 5:
+		return 2.0
+	return 2.0 + ((lvl - 5) * 0.2)
 
 func spawn_piece():
 	if level_completed or show_results_screen: return
-	
-	# [AI LOGIC] "See The Future" (Replaced Random)
-	var next_type = get_smart_piece_type()
-	if next_type == "":
+
+	ensure_piece_queue()
+	if piece_queue.is_empty():
+		solver_log("queue empty -> evaluate_end_game")
 		evaluate_end_game() # No moves left? Game Over.
 		return
+
+	var next_type = piece_queue.pop_front()
+	if not piece_queue_locked.is_empty():
+		piece_queue_locked.pop_front()
+	solver_log("spawn piece => %s | queue_after_pop=%s" % [next_type, str(piece_queue)])
 		
-	var matrix = SHAPES[next_type]
-	var spawn_x = floor(COLS / 2) - ceil(matrix[0].size() / 2.0)
-	
-	hint_active = false 
-	falling_piece = { "matrix": matrix, "type": next_type, "x": spawn_x, "y": -4 }
-	lock_timer = 0.0 
+	hint_active = false
+	hint_rotate_core = false
+	last_spawned_piece_type = next_type
+	piece_mover.spawn_piece(next_type, SHAPES, COLS)
+	falling_piece = piece_mover.falling_piece
+	lock_timer = piece_mover.lock_timer
+	ensure_piece_queue()
 	trigger_spawn_burst()
 	
 	# [TUTORIAL] Reset tutorial state for the next piece
@@ -455,49 +514,21 @@ func land_piece():
 	if level_completed or show_results_screen: return 
 	var gy = round(falling_piece.y)
 	
-	# 1. Check if connected to anything
-	var connected = false
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				var ax = falling_piece.x + c; var ay = gy + r
-				# Check neighbors
-				if is_occupied(ax+1, ay) or is_occupied(ax-1, ay) or is_occupied(ax, ay+1) or is_occupied(ax, ay-1): connected = true
-	
-	# If invalid (floating or out of bounds), reject it
-	if not connected: handle_rejection(); return
+	# 1. Validate placement
+	if not grid_board.piece_is_connected(falling_piece.x, gy, falling_piece.matrix): handle_rejection(); return
 	if gy < 0: handle_rejection(); return
+	if not grid_board.piece_fits_targets(falling_piece.x, gy, falling_piece.matrix): handle_rejection(); return
+	if not piece_matches_target_color_map(falling_piece.x, gy, falling_piece.matrix, falling_piece.type): handle_rejection(); return
 
-	# 2. Check if it matches targets (Simplified Logic)
-	var fits_ghost = true
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				var rel_x = (falling_piece.x + c) - CENTER_X; var rel_y = (gy + r) - CENTER_Y
-				var is_target = false
-				for t in current_level_targets:
-					if t.x == rel_x and t.y == rel_y: is_target = true; break
-				if not is_target: fits_ghost = false
-	if not fits_ghost: handle_rejection(); return
-	
-	# 3. SUCCESS: Place the blocks
-	last_placed_coords.clear()
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				last_placed_coords.append(Vector2(falling_piece.x + c, gy + r))
+	# 2. SUCCESS: Place the blocks
+	last_placed_coords = grid_board.commit_piece(falling_piece.x, gy, falling_piece.matrix)
+	cluster = grid_board.cluster
 	
 	placement_flash_alpha = 1.0
 	var center_x = OFFSET_X + ((falling_piece.x + falling_piece.matrix[0].size()/2.0) * GRID_SIZE)
 	var center_y = (falling_piece.y + falling_piece.matrix.size()/2.0) * GRID_SIZE
 	spawn_impact_particles(Vector2(center_x, center_y))
 
-	# Add blocks to cluster data
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				cluster.append({ "x": (falling_piece.x + c) - CENTER_X, "y": (gy + r) - CENTER_Y })
-	
 	score += 150
 	
 	# [JUICINESS] Trigger Pulse & Text
@@ -507,11 +538,8 @@ func land_piece():
 	if sfx_connect: sfx_connect.play()
 	trigger_vfx("SUCCESS")
 	falling_piece = null
+	piece_mover.falling_piece = null
 	sequence_index += 1 
-	
-	# [TUTORIAL] Advance to next lesson
-	if tutorial_active:
-		tutorial_piece_count += 1
 	
 	check_victory_100_percent() 
 	spawn_piece()
@@ -533,14 +561,7 @@ func evaluate_end_game():
 	else: trigger_game_over()
 
 func calculate_completion_percent():
-	if current_level_targets.is_empty(): return 0.0
-	var matched_count = 0
-	for t in current_level_targets:
-		for b in cluster:
-			if b.x == t.x and b.y == t.y: 
-				matched_count += 1
-				break
-	return float(matched_count) / float(current_level_targets.size())
+	return grid_board.calculate_completion_percent()
 
 func trigger_level_complete(stars):
 	if level_completed: return
@@ -580,10 +601,12 @@ func handle_rejection():
 		calculate_hint_move() 
 		hint_active = true
 		lock_timer = 0.0
+		piece_mover.reset_lock_timer()
 
 func calculate_hint_move():
 	# Simple AI to find a valid spot
 	hint_ghost_coords.clear()
+	hint_rotate_core = false
 	if falling_piece == null: return
 	var best_score = -1
 	var best_state = {}
@@ -606,8 +629,12 @@ func calculate_hint_move():
 							if sim_matrix[row][col] == 1:
 								var rel_x = (x + col) - CENTER_X
 								var rel_y = (gy + row) - CENTER_Y
-								for t in current_level_targets:
-									if t.x == rel_x and t.y == rel_y: current_score += 1
+								var required_piece = get_required_piece_for_target(rel_x, rel_y)
+								if required_piece == "" or required_piece == falling_piece.type:
+									for t in current_level_targets:
+										if t.x == rel_x and t.y == rel_y: current_score += 1
+								else:
+									current_score -= 5
 					if current_score > best_score:
 						best_score = current_score
 						best_state = { "x": x, "y": gy, "rot": r, "matrix": sim_matrix }
@@ -621,26 +648,236 @@ func calculate_hint_move():
 			for c in range(m[r].size()):
 				if m[r][c] == 1:
 					hint_ghost_coords.append(Vector2(best_state.x + c, best_state.y + r))
+	else:
+		# No valid placement in current rotation; suggest rotating the core
+		# if this piece can fit in another world orientation.
+		if can_piece_fit_in_multiverse(falling_piece.matrix):
+			hint_rotate_core = true
 
 # [AI] "SEE THE FUTURE" LOGIC
-func get_smart_piece_type():
-	var best_piece = ""
+func reset_piece_pipeline():
+	piece_queue.clear()
+	piece_queue_locked.clear()
+	piece_bag.clear()
+	next_piece_baseline_score = -9999
+	sequence_queue_index = 0
+
+func refill_piece_bag():
+	piece_bag = SHAPES.keys()
+	piece_bag.shuffle()
+
+func get_level_sequence():
+	if level_index < 0 or level_index >= game_levels.size():
+		return []
+	var level_data = game_levels[level_index]
+	if level_data == null:
+		return []
+	var seq = level_data.get("sequence")
+	if seq == null:
+		return []
+	return seq
+
+func get_next_scripted_piece():
+	var level_sequence = get_level_sequence()
+	if sequence_queue_index >= level_sequence.size():
+		return ""
+	var scripted_piece = level_sequence[sequence_queue_index]
+	sequence_queue_index += 1
+	if not SHAPES.has(scripted_piece):
+		return ""
+	if solver_debug_logs:
+		print("[SOLVER] scripted piece -> ", scripted_piece, " (idx ", sequence_queue_index - 1, ")")
+	return scripted_piece
+
+func is_scripted_level():
+	return not get_level_sequence().is_empty()
+
+func solver_log(msg):
+	if solver_debug_logs:
+		print("[SOLVER] ", msg)
+
+func get_piece_debug_snapshot(piece_type):
+	var matrix = SHAPES[piece_type]
+	var potential = evaluate_piece_potential(matrix)
+	var exact_fit = can_piece_fit_in_multiverse(matrix)
+	return {"type": piece_type, "potential": potential, "exact_fit": exact_fit}
+
+func get_piece_diversity_penalty(piece_type):
+	var penalty = 0
+	if piece_type == last_spawned_piece_type:
+		penalty += 2
+	for queued in piece_queue:
+		if queued == piece_type:
+			penalty += 1
+	return penalty
+
+func should_prefer_piece(candidate_score, candidate_penalty, best_score, best_penalty, prefer_helpful):
+	if prefer_helpful:
+		if candidate_score > best_score:
+			return true
+		if candidate_score == best_score and candidate_penalty < best_penalty:
+			return true
+		return false
+	if candidate_score < best_score:
+		return true
+	if candidate_score == best_score and candidate_penalty > best_penalty:
+		return true
+	return false
+
+func get_best_piece_global():
+	var best_type = ""
 	var best_score = -9999
-	
-	# Evaluate every possible shape
-	var candidates = SHAPES.keys()
-	candidates.shuffle() # Break ties randomly
-	
-	for type in candidates:
-		var score = evaluate_piece_potential(SHAPES[type])
-		if score > best_score:
+	var best_penalty = 9999
+	for piece_type in SHAPES.keys():
+		if not can_piece_fit_in_multiverse(SHAPES[piece_type]):
+			continue
+		var score = evaluate_piece_potential(SHAPES[piece_type])
+		var penalty = get_piece_diversity_penalty(piece_type)
+		if should_prefer_piece(score, penalty, best_score, best_penalty, true):
 			best_score = score
-			best_piece = type
-			
-	# If no piece works (score is terrible), return "" to trigger Game Over
-	if best_score < -100: return ""
-	
-	return best_piece
+			best_type = piece_type
+			best_penalty = penalty
+	if solver_debug_logs:
+		solver_log("global best candidate = %s (score=%s, penalty=%s)" % [best_type, str(best_score), str(best_penalty)])
+	return {"type": best_type, "score": best_score, "penalty": best_penalty}
+
+func pick_piece_from_bag(prefer_helpful):
+	if piece_bag.is_empty():
+		refill_piece_bag()
+	if piece_bag.is_empty():
+		return ""
+
+	var candidates = piece_bag.duplicate()
+	candidates.shuffle()
+	var selected = ""
+	var selected_score = -9999
+	var selected_penalty = 9999
+	var found_valid = false
+
+	for piece_type in candidates:
+		var fits_exact = can_piece_fit_in_multiverse(SHAPES[piece_type])
+		if not fits_exact:
+			if solver_debug_logs:
+				solver_log("bag reject %s (no exact-fit in any core rotation)" % piece_type)
+			continue
+		var score = evaluate_piece_potential(SHAPES[piece_type])
+		var penalty = get_piece_diversity_penalty(piece_type)
+		if not found_valid:
+			selected = piece_type
+			selected_score = score
+			selected_penalty = penalty
+			found_valid = true
+			continue
+		if should_prefer_piece(score, penalty, selected_score, selected_penalty, prefer_helpful):
+			selected = piece_type
+			selected_score = score
+			selected_penalty = penalty
+
+	# Safety override: if bag constraints would make the run unwinnable,
+	# prefer the globally best piece even if it is outside the current bag.
+	if prefer_helpful:
+		var global_best = get_best_piece_global()
+		if global_best.type != "":
+			var should_override = selected_score < 0
+			if global_best.score - selected_score >= SOLVER_BAG_OVERRIDE_MARGIN:
+				should_override = true
+			if should_override:
+				selected = global_best.type
+				selected_score = global_best.score
+				selected_penalty = global_best.penalty
+
+	if selected == "":
+		if solver_debug_logs:
+			solver_log("bag pick failed: no exact-fit candidates")
+		return ""
+
+	if piece_bag.has(selected):
+		piece_bag.erase(selected)
+	if solver_debug_logs:
+		solver_log("bag pick => %s (score=%s, penalty=%s, helpful=%s, remaining_bag=%s)" % [selected, str(selected_score), str(selected_penalty), str(prefer_helpful), str(piece_bag)])
+	return selected
+
+func ensure_piece_queue():
+	while piece_queue.size() < PIECE_QUEUE_SIZE:
+		var next_piece = get_next_scripted_piece()
+		var is_locked = true
+		# Classic mode is strictly sequence-driven.
+		# If the sequence is exhausted, do not generate fallback pieces.
+		if next_piece == "":
+			break
+		piece_queue.append(next_piece)
+		piece_queue_locked.append(is_locked)
+		if solver_debug_logs:
+			solver_log("queue append -> %s (locked=%s) queue=%s" % [next_piece, str(is_locked), str(piece_queue)])
+
+func enforce_next_piece_quality():
+	if is_scripted_level():
+		return
+	if piece_queue.is_empty():
+		return
+	if piece_queue_locked.size() > 0 and piece_queue_locked[0]:
+		return
+
+	var current_next = piece_queue[0]
+	var current_fit = can_piece_fit_in_multiverse(SHAPES[current_next])
+	var current_score = evaluate_piece_potential(SHAPES[current_next]) if current_fit else -9999
+	var global_best = get_best_piece_global()
+
+	var must_replace = not current_fit
+	if global_best.type != "" and global_best.type != current_next:
+		if global_best.score - current_score >= SOLVER_BAG_OVERRIDE_MARGIN:
+			must_replace = true
+
+	if not must_replace:
+		return
+	if global_best.type == "":
+		solver_log("next piece quality check: no valid replacement found")
+		return
+
+	var previous_next = piece_queue[0]
+	piece_queue[0] = global_best.type
+	if piece_bag.has(global_best.type):
+		piece_bag.erase(global_best.type)
+	if previous_next != global_best.type:
+		piece_bag.append(previous_next)
+		piece_bag.shuffle()
+	solver_log("next piece replaced: %s -> %s | queue=%s" % [previous_next, global_best.type, str(piece_queue)])
+
+func adapt_buffer_after_placement():
+	# Piece B is at index 0, Piece C (buffer) is index 1.
+	if is_scripted_level():
+		return
+	if piece_queue.size() < 2:
+		return
+	if piece_queue_locked.size() < 2:
+		return
+	if piece_queue_locked[1]:
+		return
+	if next_piece_baseline_score <= -9999:
+		return
+
+	var next_type = piece_queue[0]
+	var current_score = evaluate_piece_potential(SHAPES[next_type])
+	var score_drop = next_piece_baseline_score - current_score
+	if solver_debug_logs:
+		solver_log("buffer check next=%s baseline=%s current=%s drop=%s" % [next_type, str(next_piece_baseline_score), str(current_score), str(score_drop)])
+
+	# If Piece A blocked the best line for Piece B, tweak Piece C before it is shown.
+	if score_drop >= 8:
+		var replacement = pick_piece_from_bag(true)
+		if replacement != "":
+			var previous_buffer = piece_queue[1]
+			piece_queue[1] = replacement
+			piece_bag.append(previous_buffer)
+			piece_bag.shuffle()
+			if solver_debug_logs:
+				solver_log("buffer swap: %s -> %s | queue=%s" % [previous_buffer, replacement, str(piece_queue)])
+
+func get_smart_piece_type():
+	ensure_piece_queue()
+	if piece_queue.is_empty():
+		return ""
+	return piece_queue[0]
 
 func evaluate_piece_potential(matrix):
 	# Simulate placing this piece in every possible rotation and position
@@ -704,8 +941,10 @@ func simulate_placement_score(start_x, matrix, sim_cluster, sim_targets):
 						hits_target = true
 						break
 				
-				if hits_target: current_score += 10 # Good!
-				else: current_score -= 2 # Bad (Wasted space)
+				if hits_target:
+					current_score += 10 # Good!
+				else:
+					current_score -= 2 # Bad (Wasted space)
 				
 	return current_score
 
@@ -726,12 +965,7 @@ func check_piece_against_world(base_matrix, test_cluster, test_targets):
 	return false
 
 func rotate_simulation_data(clus, targs):
-	for b in clus:
-		var nx = b.y; var ny = -b.x - 1
-		b.x = nx; b.y = ny
-	for t in targs:
-		var nx = t.y; var ny = -t.x - 1
-		t.x = nx; t.y = ny
+	grid_board.rotate_simulation_data(clus, targs)
 
 func simulate_drop(start_x, matrix, test_cluster, test_targets):
 	var sim_y = -4.0
@@ -785,28 +1019,13 @@ func check_sim_occupied(x, y, test_cluster):
 	return false
 
 func will_collide(tx, ty, matrix):
-	for r in range(matrix.size()):
-		for c in range(matrix[r].size()):
-			if matrix[r][c] == 1:
-				var ax = tx + c
-				var ay = ty + r
-				if ax < 0 or ax >= COLS: return true
-				if floor(ay + 0.9) >= ROWS: return true
-				if ay >= 0:
-					if is_occupied(ax, floor(ay + 0.1)) or is_occupied(ax, floor(ay + 0.9)): return true
-	return false
+	return grid_board.will_collide(tx, ty, matrix)
 
 func is_occupied(x, y):
-	for b in cluster:
-		if CENTER_X + b.x == x and CENTER_Y + b.y == y: return true
-	return false
+	return grid_board.is_occupied(x, y)
 
 func rotate_matrix_data(m):
-	var new_m = []
-	var N = m.size(); var M = m[0].size()
-	for i in range(M): new_m.append([]); for j in range(N): new_m[i].append(0)
-	for i in range(M): for j in range(N): new_m[i][j] = m[N - 1 - j][i]
-	return new_m
+	return piece_mover.rotate_matrix_data(m)
 
 func rotate_piece(dir):
 	if falling_piece == null: return
@@ -818,31 +1037,65 @@ func rotate_piece(dir):
 
 func rotate_core(dir):
 	if level_completed or show_results_screen: return
-	var new_cluster = []
-	for b in cluster:
-		var nx; var ny
-		if dir == 1: nx = -b.y - 1; ny = b.x
-		else: nx = b.y; ny = -b.x - 1
-		if CENTER_X + nx < 0 or CENTER_X + nx >= COLS: return 
-		new_cluster.append({"x": nx, "y": ny})
-	
-	var new_targets = []
-	for t in current_level_targets:
-		var nx; var ny
-		if dir == 1: nx = -t.y - 1; ny = t.x
-		else: nx = t.y; ny = -t.x - 1
-		new_targets.append({"x": nx, "y": ny})
-	
-	cluster = new_cluster
-	current_level_targets = new_targets
-	
+	if not grid_board.rotate_core(dir): return
+
+	cluster = grid_board.cluster
+	current_level_targets = grid_board.current_level_targets
+	rotate_target_piece_map(dir)
+
 	if hint_active: calculate_hint_move()
-	
-	if dir == 1: visual_core_rotation = -90.0
-	else: visual_core_rotation = 90.0
+
+	if dir == 1:
+		visual_core_rotation = -90.0
+	else:
+		visual_core_rotation = 90.0
 	var tween = create_tween()
 	tween.tween_property(self, "visual_core_rotation", 0.0, 0.2).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	check_victory_100_percent()
+
+func _target_key(rel_x, rel_y):
+	return str(int(rel_x)) + "," + str(int(rel_y))
+
+func get_required_piece_for_target(rel_x, rel_y):
+	return level_target_piece_map.get(_target_key(rel_x, rel_y), "")
+
+func get_piece_color(piece_type):
+	return PIECE_COLORS.get(piece_type, COLOR_TARGET)
+
+func piece_matches_target_color_map(piece_x, piece_y, matrix, piece_type):
+	if level_target_piece_map.is_empty():
+		return true
+	for r in range(matrix.size()):
+		for c in range(matrix[r].size()):
+			if matrix[r][c] == 1:
+				var rel_x = (piece_x + c) - CENTER_X
+				var rel_y = (piece_y + r) - CENTER_Y
+				var required_piece = get_required_piece_for_target(rel_x, rel_y)
+				if required_piece != "" and required_piece != piece_type:
+					return false
+	return true
+
+func rotate_target_piece_map(dir):
+	if level_target_piece_map.is_empty():
+		return
+	var rotated = {}
+	for key in level_target_piece_map.keys():
+		var piece_type = level_target_piece_map[key]
+		var parts = str(key).split(",")
+		if parts.size() < 2:
+			continue
+		var x = int(parts[0])
+		var y = int(parts[1])
+		var nx
+		var ny
+		if dir == 1:
+			nx = -y - 1
+			ny = x
+		else:
+			nx = y
+			ny = -x - 1
+		rotated[_target_key(nx, ny)] = piece_type
+	level_target_piece_map = rotated
 
 func spawn_impact_particles(pos):
 	var particles = CPUParticles2D.new()
@@ -872,29 +1125,20 @@ func trigger_vfx(type):
 
 func hard_drop():
 	if falling_piece == null or show_results_screen or control_mode == "CORE": return
-	if is_hard_dropping: return 
+	if is_hard_dropping: return
 	if tutorial_active: return # Disable Hard Drop in Tutorial
-	
-	is_hard_dropping = true 
-	falling_piece.y = floor(falling_piece.y)
-	
-	var score_gained = 0
-	var start_y = falling_piece.y * GRID_SIZE
-	while not will_collide(falling_piece.x, falling_piece.y + 1, falling_piece.matrix):
-		falling_piece.y += 1
-		score_gained += 2
-	
-	if score_gained > 0:
-		score += score_gained
-		spawn_floating_text(Vector2(OFFSET_X + (falling_piece.x * GRID_SIZE), falling_piece.y * GRID_SIZE), score_gained)
 
-	var matrix_w = falling_piece.matrix[0].size() * GRID_SIZE
-	var matrix_h = falling_piece.matrix.size() * GRID_SIZE
-	var draw_x = OFFSET_X + (falling_piece.x * GRID_SIZE)
-	var end_y = falling_piece.y * GRID_SIZE
-	drop_trail_rect = Rect2(draw_x, start_y, matrix_w, end_y - start_y + matrix_h)
-	drop_trail_alpha = 0.4 
-	
+	is_hard_dropping = true
+	var drop_result = piece_mover.hard_drop(grid_board, OFFSET_X, GRID_SIZE)
+	falling_piece = piece_mover.falling_piece
+
+	if drop_result.score_gained > 0:
+		score += drop_result.score_gained
+		spawn_floating_text(Vector2(OFFSET_X + (falling_piece.x * GRID_SIZE), falling_piece.y * GRID_SIZE), drop_result.score_gained)
+
+	drop_trail_rect = Rect2(drop_result.draw_x, drop_result.start_y, drop_result.matrix_w, drop_result.end_y - drop_result.start_y + drop_result.matrix_h)
+	drop_trail_alpha = 0.4
+
 	queue_redraw()
 	await get_tree().create_timer(0.15).timeout
 	land_piece()
@@ -1059,6 +1303,12 @@ func spawn_floating_text(pos, value):
 # ==============================================================================
 # DRAWING (Rendering the Game)
 # ==============================================================================
+func get_piece_landing_y(start_x, start_y, matrix):
+	var ghost_y = floor(start_y)
+	while not will_collide(start_x, ghost_y + 1, matrix):
+		ghost_y += 1
+	return ghost_y
+
 func _draw():
 	var vp_size = get_viewport_rect().size
 	# 1. Background
@@ -1114,9 +1364,28 @@ func _draw():
 			draw_rect(Rect2(draw_x, draw_y, GRID_SIZE, GRID_SIZE), Color(dynamic_ghost_col.r, dynamic_ghost_col.g, dynamic_ghost_col.b, 0.3), true)
 			draw_rect(Rect2(draw_x, draw_y, GRID_SIZE, GRID_SIZE), dynamic_ghost_col, false, 2.0)
 
-	# 6. Draw Falling Piece
+	if hint_active and hint_rotate_core and hint_ghost_coords.is_empty() and control_mode == "PIECE":
+		var hint_font = custom_font if custom_font else ThemeDB.fallback_font
+		var hint_text = "HINT: ROTATE CORE"
+		var hint_pos = Vector2(20, (CENTER_Y * GRID_SIZE) + (GRID_SIZE * 5))
+		draw_string(hint_font, hint_pos, hint_text, HORIZONTAL_ALIGNMENT_CENTER, vp_size.x - 40, 24, Color("81a1c1"))
+
+	# 6. Draw Falling Piece + Ghost Projection
 	if falling_piece != null:
-		var py = falling_piece.y; var px = falling_piece.x
+		var px = falling_piece.x
+		var py = falling_piece.y
+		var ghost_y = get_piece_landing_y(px, py, falling_piece.matrix)
+
+		# Ghost projection (where piece will land)
+		if control_mode == "PIECE" and ghost_y >= py:
+			for r in range(falling_piece.matrix.size()):
+				for c in range(falling_piece.matrix[r].size()):
+					if falling_piece.matrix[r][c] == 1:
+						var g_x = OFFSET_X + ((px + c) * GRID_SIZE)
+						var g_y = (ghost_y + r) * GRID_SIZE
+						draw_rect(Rect2(g_x + 6, g_y + 6, GRID_SIZE - 12, GRID_SIZE - 12), Color(1, 1, 1, 0.08), true)
+						draw_rect(Rect2(g_x + 6, g_y + 6, GRID_SIZE - 12, GRID_SIZE - 12), Color(1, 1, 1, 0.25), false, 2.0)
+
 		for r in range(falling_piece.matrix.size()):
 			for c in range(falling_piece.matrix[r].size()):
 				if falling_piece.matrix[r][c] == 1:
@@ -1229,6 +1498,7 @@ func draw_tutorial_overlay(vp_size):
 	
 	var instruction_text = ""
 	var hand_pos = center
+	var hand_drop_offset = Vector2(0, GRID_SIZE * 3)
 	# Animation cycle (2.5 seconds loop)
 	var anim_cycle = fmod(tutorial_hand_animation_timer, 2.5)
 	var hand_scale = 1.0
@@ -1266,10 +1536,13 @@ func draw_tutorial_overlay(vp_size):
 		if anim_cycle > 1.0 and anim_cycle < 1.2:
 			hand_scale = 0.8; hand_color = Color(0.8,0.8,0.8,1) # Tap
 	
+	hand_pos += hand_drop_offset
 	draw_square_hand_icon(hand_pos, hand_color, hand_scale)
-	
-	var text_pos = center - Vector2(0, 100)
-	draw_string(font_to_use, text_pos - Vector2(100, 0), instruction_text, HORIZONTAL_ALIGNMENT_CENTER, 200, 32, Color.WHITE)
+
+	var tutorial_font_size = 24
+	var max_text_width = vp_size.x - 40
+	var text_pos = Vector2(20, center.y - 60)
+	draw_string(font_to_use, text_pos, instruction_text, HORIZONTAL_ALIGNMENT_CENTER, max_text_width, tutorial_font_size, Color.WHITE)
 
 func draw_square_hand_icon(pos, color, scale_mod=1.0):
 	# Pixel art style "Mitten" cursor using rects
