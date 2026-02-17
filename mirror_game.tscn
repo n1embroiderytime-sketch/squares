@@ -1,6 +1,6 @@
 [gd_scene load_steps=7 format=3 uid="uid://do0136veypqyi"]
 
-[ext_resource type="Script" uid="uid://c7v6h26rqdo46" path="res://mirror_mode.gd" id="1_p4s1l"]
+[ext_resource type="Script" path="res://mirror_mode.gd" id="1_p4s1l"]
 [ext_resource type="Resource" uid="uid://bwx8ecau0eewa" path="res://Gamemodes/Classic/Level001.tres" id="2_2pltu"]
 [ext_resource type="Resource" uid="uid://bcs43v8duw8xa" path="res://Gamemodes/Classic/Level002.tres" id="3_f52ns"]
 [ext_resource type="Resource" uid="uid://dymai6sqjh4o1" path="res://Gamemodes/Classic/Level010.tres" id="2_ykeeq"]
