@@ -185,6 +185,8 @@ func _ready():
 	CENTER_Y = floor(ROWS * 0.65)
 	OFFSET_X = (vp_size.x - (COLS * GRID_SIZE)) / 2
 	sfx_connect = $SfxConnect
+	if sfx_connect:
+		sfx_connect.volume_db = Global.get_sfx_db()
 
 	grid_board = GridBoardScript.new()
 	add_child(grid_board)
@@ -277,9 +279,22 @@ func _input(event):
 			if btn_p_resume.has_point(event.position):
 				toggle_pause()
 			elif btn_p_levels.has_point(event.position):
+				is_game_paused = false
 				get_tree().change_scene_to_file("res://level_select.tscn")
 			elif btn_p_settings.has_point(event.position):
-				print("Settings Clicked") # Placeholder
+				Global.settings_return_scene = "res://main_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
+		if event is InputEventScreenTouch and event.pressed:
+			if btn_p_resume.has_point(event.position):
+				toggle_pause()
+			elif btn_p_levels.has_point(event.position):
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://level_select.tscn")
+			elif btn_p_settings.has_point(event.position):
+				Global.settings_return_scene = "res://main_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
 		return
 
 	# 2. HANDLE RESULTS SCREEN CLICKS
@@ -1040,8 +1055,38 @@ func rotate_piece(dir):
 		new_m = rotate_matrix_data(rotate_matrix_data(rotate_matrix_data(m)))
 	if not will_collide(falling_piece.x, falling_piece.y, new_m): falling_piece.matrix = new_m
 
+func can_rotate_core_without_piece_overlap(dir):
+	if falling_piece == null:
+		return true
+
+	var falling_cells = {}
+	for r in range(falling_piece.matrix.size()):
+		for c in range(falling_piece.matrix[r].size()):
+			if falling_piece.matrix[r][c] == 1:
+				var ax = falling_piece.x + c
+				var ay = int(floor(falling_piece.y + r + 0.5))
+				if ay >= 0:
+					falling_cells[str(ax) + "," + str(ay)] = true
+
+	for b in cluster:
+		var nx
+		var ny
+		if dir == 1:
+			nx = -b.y - 1
+			ny = b.x
+		else:
+			nx = b.y
+			ny = -b.x - 1
+		var abs_x = CENTER_X + nx
+		var abs_y = CENTER_Y + ny
+		if falling_cells.has(str(abs_x) + "," + str(abs_y)):
+			return false
+
+	return true
+
 func rotate_core(dir):
 	if level_completed or show_results_screen: return
+	if not can_rotate_core_without_piece_overlap(dir): return
 	if not grid_board.rotate_core(dir): return
 
 	cluster = grid_board.cluster

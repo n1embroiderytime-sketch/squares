@@ -13,6 +13,8 @@ var has_smashed = false # Flag to prevent double-smashing
 @onready var sfx_smash = $SfxSmash
 
 func _ready():
+	if sfx_smash:
+		sfx_smash.volume_db = Global.get_sfx_db()
 	# Start the safety timer (Auto-smash if user does nothing)
 	get_tree().create_timer(AUTO_SMASH_TIME).timeout.connect(_on_timeout)
 

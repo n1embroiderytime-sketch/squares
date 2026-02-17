@@ -32,6 +32,8 @@ func _ready():
 	CENTER_Y = floor(ROWS * 0.65)
 	OFFSET_X = (vp_size.x - (COLS * GRID_SIZE)) / 2
 	sfx_connect = $SfxConnect
+	if sfx_connect:
+		sfx_connect.volume_db = Global.get_sfx_db()
 
 	grid_board = GridBoardScript.new()
 	add_child(grid_board)
@@ -274,6 +276,10 @@ func _input(event):
 				get_tree().change_scene_to_file("res://level_select.tscn")
 				return
 			elif btn_p_settings.has_point(event.position):
+				commit_endless_progress(true)
+				Global.settings_return_scene = "res://endless_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
 				return
 		if event is InputEventScreenTouch and event.pressed:
 			if btn_p_resume.has_point(event.position):
@@ -285,6 +291,10 @@ func _input(event):
 				get_tree().change_scene_to_file("res://level_select.tscn")
 				return
 			elif btn_p_settings.has_point(event.position):
+				commit_endless_progress(true)
+				Global.settings_return_scene = "res://endless_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
 				return
 
 	super._input(event)
@@ -493,6 +503,7 @@ func rotate_core(dir):
 	grid_board.cluster = cluster
 
 	if is_resetting or level_completed or show_results_screen: return
+	if not can_rotate_core_without_piece_overlap(dir): return
 	var new_cluster = []
 	for b in cluster:
 		var nx; var ny
