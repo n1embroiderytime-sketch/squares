@@ -10,7 +10,6 @@
 [node name="MainGame" type="Node2D"]
 script = ExtResource("1_p4s1l")
 game_levels = Array[Resource]([ExtResource("2_2pltu"), ExtResource("3_f52ns"), ExtResource("2_ykeeq"), ExtResource("5_l5ukw")])
-mirror_game_levels = Array[Resource]([ExtResource("2_2pltu"), ExtResource("3_f52ns"), ExtResource("2_ykeeq"), ExtResource("5_l5ukw")])
 
 [node name="SfxConnect" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("6_wcdf2")

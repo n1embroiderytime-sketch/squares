@@ -5,6 +5,8 @@ extends "res://main_game.gd"
 func _ready():
 	if not mirror_game_levels.is_empty():
 		game_levels = mirror_game_levels.duplicate(true)
+	elif not Global.game_levels.is_empty():
+		game_levels = Global.game_levels.duplicate(true)
 	super._ready()
 
 func _draw():

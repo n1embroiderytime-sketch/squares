@@ -2,6 +2,9 @@ extends Control
 
 @export var all_levels: Array[Resource] = []
 @export var classic_levels_path: String = "res://Gamemodes/Classic"
+@export var mirror_levels_path: String = "res://Gamemodes/Mirror"
+
+var mirror_levels: Array[Resource] = []
 
 @onready var grid_classic = $MainMargin/LayoutList/SectionClassic/ContainerClassic/LevelRow
 @onready var grid_endless = $MainMargin/LayoutList/SectionEndless/ContainerEndless/LevelRow
@@ -17,6 +20,8 @@ func _ready():
 		all_levels = Global.game_levels.duplicate(true)
 	else:
 		Global.game_levels = all_levels.duplicate(true)
+
+	mirror_levels = load_levels_from_folder(mirror_levels_path)
 
 	setup_endless_mode()
 	setup_classic_mode()
@@ -83,17 +88,24 @@ func setup_classic_mode():
 			btn.pressed.connect(func(): _on_level_pressed(lvl_idx))
 
 func setup_mirror_mode():
-	var btn_mirror = preload("res://LevelButton.gd").new()
-	mirror_row.add_child(btn_mirror)
+	if mirror_levels.is_empty():
+		var label = Label.new()
+		label.text = "NO MIRROR LEVELS"
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mirror_row.add_child(label)
+		return
 
-	var mirror_data = load("res://Gamemodes/Classic/Level001.tres")
-	btn_mirror.setup(0, mirror_data, false, 0)
-	btn_mirror.pressed.connect(func():
-		Global.selected_level = 0
-		get_tree().change_scene_to_file("res://mirror_game.tscn")
-	)
-	btn_mirror.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn_mirror.custom_minimum_size = Vector2(0, 180)
+	for i in range(mirror_levels.size()):
+		var data = mirror_levels[i]
+		var btn_mirror = preload("res://LevelButton.gd").new()
+		mirror_row.add_child(btn_mirror)
+		btn_mirror.setup(i + 1, data, false, 0)
+		var mirror_idx = i
+		btn_mirror.pressed.connect(func():
+			Global.selected_level = mirror_idx
+			Global.game_levels = mirror_levels.duplicate(true)
+			get_tree().change_scene_to_file("res://mirror_game.tscn")
+		)
 
 func _clear_container(container):
 	for child in container.get_children():
