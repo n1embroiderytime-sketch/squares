@@ -54,14 +54,18 @@ func setup_classic_mode():
 			btn.pressed.connect(func(): _on_level_pressed(lvl_idx))
 
 func setup_mirror_mode():
-	var mirror_container = $MainMargin/LayoutList/SectionMirror
-	mirror_container.modulate = Color(1, 1, 1, 0.5)
+	var btn_mirror = preload("res://LevelButton.gd").new()
+	mirror_row.add_child(btn_mirror)
 
-	var label = Label.new()
-	label.text = "COMING SOON"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 20)
-	mirror_row.add_child(label)
+	var mirror_data_path = "res://Gamemodes/Classic/Level001.tres"
+	var mirror_data = load(mirror_data_path)
+	btn_mirror.setup(0, mirror_data, false, 0)
+	btn_mirror.pressed.connect(func():
+		Global.selected_level = 0
+		get_tree().change_scene_to_file("res://mirror_game.tscn")
+	)
+	btn_mirror.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_mirror.custom_minimum_size = Vector2(0, 180)
 
 func _clear_container(container):
 	for child in container.get_children():

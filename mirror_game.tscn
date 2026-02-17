@@ -1,8 +1,15 @@
-[gd_scene load_steps=3 format=3 uid="uid://do0136veypqyi"]
+[gd_scene load_steps=7 format=3 uid="uid://do0136veypqyi"]
 
 [ext_resource type="Script" uid="uid://c7v6h26rqdo46" path="res://mirror_mode.gd" id="1_p4s1l"]
-[ext_resource type="Script" uid="uid://d2ib4hlgfelna" path="res://LevelData.gd" id="2_kegut"]
+[ext_resource type="Resource" uid="uid://bwx8ecau0eewa" path="res://Gamemodes/Classic/Level001.tres" id="2_2pltu"]
+[ext_resource type="Resource" uid="uid://bcs43v8duw8xa" path="res://Gamemodes/Classic/Level002.tres" id="3_f52ns"]
+[ext_resource type="Resource" uid="uid://dymai6sqjh4o1" path="res://Gamemodes/Classic/Level010.tres" id="2_ykeeq"]
+[ext_resource type="Resource" uid="uid://da47pol1fwenb" path="res://Gamemodes/Classic/Level013.tres" id="5_l5ukw"]
+[ext_resource type="AudioStream" uid="uid://b42olgr5yhvk2" path="res://Audio/confirmation_003.ogg" id="6_wcdf2"]
 
 [node name="MainGame" type="Node2D"]
 script = ExtResource("1_p4s1l")
-game_levels = Array[ExtResource("2_kegut")]([null])
+game_levels = Array[Resource]([ExtResource("2_2pltu"), ExtResource("3_f52ns"), ExtResource("2_ykeeq"), ExtResource("5_l5ukw")])
+
+[node name="SfxConnect" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("6_wcdf2")
