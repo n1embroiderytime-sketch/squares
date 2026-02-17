@@ -105,7 +105,7 @@ var shake_intensity = 0.0        # How much the screen is shaking
 var current_level_targets = []   # Where the gray target blocks are
 
 # Speed & Pause
-var current_fall_speed = 2.0     # How fast pieces fall
+var current_fall_speed = 1.4     # How fast pieces fall
 var is_game_paused = false       # Is the pause menu open?
 
 # Scoring
@@ -271,7 +271,7 @@ func _process(delta):
 # INPUT HANDLING
 # ==============================================================================
 func _input(event):
-	if is_hard_dropping: return 
+	if is_hard_dropping and not is_game_paused: return
 	
 	# 1. HANDLE PAUSE MENU CLICKS
 	if is_game_paused:
@@ -280,6 +280,7 @@ func _input(event):
 				toggle_pause()
 			elif btn_p_levels.has_point(event.position):
 				is_game_paused = false
+				get_viewport().set_input_as_handled()
 				get_tree().change_scene_to_file("res://level_select.tscn")
 			elif btn_p_settings.has_point(event.position):
 				Global.settings_return_scene = "res://main_game.tscn"
@@ -290,6 +291,7 @@ func _input(event):
 				toggle_pause()
 			elif btn_p_levels.has_point(event.position):
 				is_game_paused = false
+				get_viewport().set_input_as_handled()
 				get_tree().change_scene_to_file("res://level_select.tscn")
 			elif btn_p_settings.has_point(event.position):
 				Global.settings_return_scene = "res://main_game.tscn"
@@ -494,8 +496,8 @@ func init_level(idx):
 # Difficulty Curve Formula
 func get_fall_speed_for_level(lvl):
 	if lvl < 5:
-		return 2.0
-	return 2.0 + ((lvl - 5) * 0.2)
+		return 1.4
+	return 1.4 + ((lvl - 5) * 0.15)
 
 func spawn_piece():
 	if level_completed or show_results_screen: return
@@ -533,6 +535,8 @@ func spawn_piece():
 func land_piece():
 	if level_completed or show_results_screen: return 
 	var gy = round(falling_piece.y)
+	if will_collide(falling_piece.x, gy, falling_piece.matrix):
+		handle_rejection(); return
 	
 	# 1. Validate placement
 	if not grid_board.piece_is_connected(falling_piece.x, gy, falling_piece.matrix): handle_rejection(); return

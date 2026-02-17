@@ -262,7 +262,7 @@ func commit_endless_progress(force_save := false):
 		Global.save_game()
 
 func _input(event):
-	if is_resetting:
+	if is_resetting and not is_game_paused:
 		return
 
 	if is_game_paused:
@@ -273,6 +273,7 @@ func _input(event):
 			elif btn_p_levels.has_point(event.position):
 				commit_endless_progress(true)
 				is_game_paused = false
+				get_viewport().set_input_as_handled()
 				get_tree().change_scene_to_file("res://level_select.tscn")
 				return
 			elif btn_p_settings.has_point(event.position):
@@ -288,6 +289,7 @@ func _input(event):
 			elif btn_p_levels.has_point(event.position):
 				commit_endless_progress(true)
 				is_game_paused = false
+				get_viewport().set_input_as_handled()
 				get_tree().change_scene_to_file("res://level_select.tscn")
 				return
 			elif btn_p_settings.has_point(event.position):
@@ -343,6 +345,8 @@ func handle_rejection():
 func land_piece():
 	if is_resetting: return
 	var gy = round(falling_piece.y)
+	if will_collide(falling_piece.x, gy, falling_piece.matrix):
+		handle_rejection(); return
 	
 	var connected = false
 	for r in range(falling_piece.matrix.size()):
@@ -376,6 +380,9 @@ func land_piece():
 				var world_y = ((CENTER_Y + final_y) * GRID_SIZE) + (GRID_SIZE/2.0)
 				
 				if inside_x and inside_y:
+					if get_block_at_rel(final_x, final_y) != null:
+						handle_rejection()
+						return
 					cluster.append({ "x": final_x, "y": final_y, "is_gold": false, "is_starting_core": false })
 					grid_board.cluster = cluster
 					blocks_added_count += 1
