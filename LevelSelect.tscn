@@ -124,9 +124,14 @@ theme_override_fonts/font = ExtResource("2_q3t17")
 theme_override_font_sizes/font_size = 20
 text = "MIRROR"
 
-[node name="ContainerMirror" type="CenterContainer" parent="MainMargin/LayoutList/SectionMirror"]
+[node name="ContainerMirror" type="ScrollContainer" parent="MainMargin/LayoutList/SectionMirror"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 220)
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
 
-[node name="LevelRow" type="HBoxContainer" parent="MainMargin/LayoutList/SectionMirror/ContainerMirror"]
+[node name="LevelRow" type="GridContainer" parent="MainMargin/LayoutList/SectionMirror/ContainerMirror"]
 layout_mode = 2
-theme_override_constants/separation = 20
+columns = 3
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 20

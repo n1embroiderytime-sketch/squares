@@ -18,10 +18,14 @@ func _ready():
 	playlist.shuffle()
 	
 	# Start the first song
+	if has_node("/root/Global"):
+		player.volume_db = Global.get_music_db()
 	play_music()
 
 func play_music():
 	# Load the current song into the player
+	if has_node("/root/Global"):
+		player.volume_db = Global.get_music_db()
 	player.stream = playlist[current_index]
 	player.play()
 

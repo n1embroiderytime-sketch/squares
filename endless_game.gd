@@ -32,6 +32,8 @@ func _ready():
 	CENTER_Y = floor(ROWS * 0.65)
 	OFFSET_X = (vp_size.x - (COLS * GRID_SIZE)) / 2
 	sfx_connect = $SfxConnect
+	if sfx_connect:
+		sfx_connect.volume_db = Global.get_sfx_db()
 
 	grid_board = GridBoardScript.new()
 	add_child(grid_board)
@@ -52,22 +54,108 @@ func _ready():
 
 	spawn_portal_particles()
 
-	cluster = [
-		{"x": -1, "y": -1, "is_gold": true, "is_starting_core": true},
-		{"x": 0, "y": -1, "is_gold": true, "is_starting_core": true},
-		{"x": -1, "y": 0, "is_gold": true, "is_starting_core": true},
-		{"x": 0, "y": 0, "is_gold": true, "is_starting_core": true}
-	]
+	cluster = get_default_core_cluster()
 	grid_board.cluster = cluster
 	current_level_targets = []
 	grid_board.current_level_targets = []
 	level_theme_color = THEME_COLORS.pick_random()
 
 	reset_piece_pipeline()
-	ensure_piece_queue()
+	var restored_from_save = restore_endless_run_state()
+	if not restored_from_save:
+		ensure_piece_queue()
+		spawn_piece()
+	else:
+		ensure_piece_queue()
+		if falling_piece == null:
+			spawn_piece()
+
+	if portal_particles:
+		portal_particles.color = level_theme_color
 	trigger_spawn_burst()
-	spawn_piece()
 	commit_endless_progress(true)
+
+
+func get_default_core_cluster():
+	return [
+		{"x": -1, "y": -1, "is_gold": true, "is_starting_core": true},
+		{"x": 0, "y": -1, "is_gold": true, "is_starting_core": true},
+		{"x": -1, "y": 0, "is_gold": true, "is_starting_core": true},
+		{"x": 0, "y": 0, "is_gold": true, "is_starting_core": true}
+	]
+
+func serialize_falling_piece():
+	if falling_piece == null:
+		return {}
+	return {
+		"type": falling_piece.get("type", ""),
+		"x": falling_piece.get("x", 0),
+		"y": falling_piece.get("y", -4.0),
+		"matrix": falling_piece.get("matrix", [])
+	}
+
+func deserialize_falling_piece(saved_piece):
+	if not (saved_piece is Dictionary):
+		return false
+	if not saved_piece.has("type") or not SHAPES.has(saved_piece["type"]):
+		return false
+	if not saved_piece.has("matrix"):
+		return false
+	falling_piece = {
+		"type": String(saved_piece["type"]),
+		"x": int(saved_piece.get("x", floor(COLS / 2))),
+		"y": float(saved_piece.get("y", -4.0)),
+		"matrix": saved_piece.get("matrix", SHAPES[saved_piece["type"]]).duplicate(true)
+	}
+	piece_mover.falling_piece = falling_piece
+	lock_timer = 0.0
+	piece_mover.lock_timer = 0.0
+	return true
+
+func build_endless_save_state():
+	return {
+		"score": max(0, int(score)),
+		"cluster": cluster.duplicate(true),
+		"piece_queue": piece_queue.duplicate(true),
+		"piece_queue_locked": piece_queue_locked.duplicate(true),
+		"piece_bag": piece_bag.duplicate(true),
+		"falling_piece": serialize_falling_piece(),
+		"current_base_zoom": current_base_zoom,
+		"prestige_count": prestige_count,
+		"level_theme_color": [level_theme_color.r, level_theme_color.g, level_theme_color.b, level_theme_color.a]
+	}
+
+func restore_endless_run_state():
+	if not Global.endless_has_saved_run:
+		return false
+	if not (Global.endless_run_state is Dictionary):
+		return false
+	var saved = Global.endless_run_state
+	if not saved.has("cluster") or not (saved["cluster"] is Array) or saved["cluster"].is_empty():
+		return false
+
+	cluster = saved["cluster"].duplicate(true)
+	grid_board.cluster = cluster
+	score = int(saved.get("score", Global.endless_current_score))
+	visual_score = float(score)
+	current_base_zoom = float(saved.get("current_base_zoom", 1.0))
+	prestige_count = int(saved.get("prestige_count", 0))
+	control_mode = "PIECE"
+
+	var saved_color = saved.get("level_theme_color", [])
+	if saved_color is Array and saved_color.size() >= 4:
+		level_theme_color = Color(float(saved_color[0]), float(saved_color[1]), float(saved_color[2]), float(saved_color[3]))
+
+	piece_queue = saved.get("piece_queue", []).duplicate(true)
+	piece_queue_locked = saved.get("piece_queue_locked", []).duplicate(true)
+	piece_bag = saved.get("piece_bag", []).duplicate(true)
+
+	var piece_restored = deserialize_falling_piece(saved.get("falling_piece", {}))
+	if not piece_restored:
+		falling_piece = null
+		piece_mover.falling_piece = null
+
+	return true
 
 # --- PROCEDURAL TEXTURE GENERATION ---
 # 64x64 Texture with 6px Border
@@ -168,33 +256,60 @@ func commit_endless_progress(force_save := false):
 	if current_score_int > Global.endless_high_score:
 		Global.endless_high_score = current_score_int
 		force_save = true
+	Global.endless_run_state = build_endless_save_state()
+	Global.endless_has_saved_run = true
 	if force_save:
 		Global.save_game()
 
 func _input(event):
-	if is_resetting:
+	if is_resetting and not is_game_paused:
 		return
 
-	if is_game_paused and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if btn_p_resume.has_point(event.position):
-			toggle_pause()
-			return
-		elif btn_p_levels.has_point(event.position):
-			commit_endless_progress(true)
-			is_game_paused = false
-			get_tree().change_scene_to_file("res://level_select.tscn")
-			return
-		elif btn_p_settings.has_point(event.position):
-			return
+	if is_game_paused:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if btn_p_resume.has_point(event.position):
+				toggle_pause()
+				return
+			elif btn_p_levels.has_point(event.position):
+				commit_endless_progress(true)
+				is_game_paused = false
+				get_viewport().set_input_as_handled()
+				get_tree().change_scene_to_file("res://level_select.tscn")
+				return
+			elif btn_p_settings.has_point(event.position):
+				commit_endless_progress(true)
+				Global.settings_return_scene = "res://endless_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
+				return
+		if event is InputEventScreenTouch and event.pressed:
+			if btn_p_resume.has_point(event.position):
+				toggle_pause()
+				return
+			elif btn_p_levels.has_point(event.position):
+				commit_endless_progress(true)
+				is_game_paused = false
+				get_viewport().set_input_as_handled()
+				get_tree().change_scene_to_file("res://level_select.tscn")
+				return
+			elif btn_p_settings.has_point(event.position):
+				commit_endless_progress(true)
+				Global.settings_return_scene = "res://endless_game.tscn"
+				is_game_paused = false
+				get_tree().change_scene_to_file("res://settings_menu.tscn")
+				return
 
 	super._input(event)
 
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var vp_size = get_viewport_rect().size
-		var pause_rect = Rect2(vp_size.x - 70, 10, 60, 60)
-		if pause_rect.has_point(event.position):
+	if not is_game_paused:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and btn_pause_rect.has_point(event.position):
 			toggle_pause()
 			commit_endless_progress(true)
+			return
+		if event is InputEventScreenTouch and event.pressed and btn_pause_rect.has_point(event.position):
+			toggle_pause()
+			commit_endless_progress(true)
+			return
 
 func _process(delta):
 	super._process(delta)
@@ -230,6 +345,8 @@ func handle_rejection():
 func land_piece():
 	if is_resetting: return
 	var gy = round(falling_piece.y)
+	if will_collide(falling_piece.x, gy, falling_piece.matrix):
+		handle_rejection(); return
 	
 	var connected = false
 	for r in range(falling_piece.matrix.size()):
@@ -263,6 +380,9 @@ func land_piece():
 				var world_y = ((CENTER_Y + final_y) * GRID_SIZE) + (GRID_SIZE/2.0)
 				
 				if inside_x and inside_y:
+					if get_block_at_rel(final_x, final_y) != null:
+						handle_rejection()
+						return
 					cluster.append({ "x": final_x, "y": final_y, "is_gold": false, "is_starting_core": false })
 					grid_board.cluster = cluster
 					blocks_added_count += 1
@@ -307,6 +427,10 @@ func spawn_trim_particles(pos):
 func check_gold_squares():
 	var max_checked_size = MAX_RADIUS_BEFORE_RESET * 2
 	var newly_gold = false
+
+	var line_limit = MAX_RADIUS_BEFORE_RESET
+	var line_min = -line_limit
+	var line_max = line_limit - 1
 	for size in range(4, max_checked_size + 1, 2): 
 		var half = size / 2
 		var min_val = -half; var max_val = half - 1
@@ -329,6 +453,48 @@ func check_gold_squares():
 					var world_x = center_x + (b.x * GRID_SIZE) + (GRID_SIZE/2.0)
 					var world_y = ((CENTER_Y + b.y) * GRID_SIZE) + (GRID_SIZE/2.0)
 					spawn_floating_text(Vector2(world_x, world_y), 500)
+
+	for y in range(line_min, line_max + 1):
+		var is_perfect_row = true
+		var row_blocks = []
+		for x in range(line_min, line_max + 1):
+			var row_block = get_block_at_rel(x, y)
+			if row_block == null:
+				is_perfect_row = false
+				break
+			row_blocks.append(row_block)
+		if is_perfect_row:
+			for b in row_blocks:
+				if not b.get("is_gold", false):
+					b["is_gold"] = true
+					newly_gold = true
+					score += 500
+					var vp_size = get_viewport_rect().size
+					var center_x = vp_size.x / 2.0
+					var world_x = center_x + (b.x * GRID_SIZE) + (GRID_SIZE / 2.0)
+					var world_y = ((CENTER_Y + b.y) * GRID_SIZE) + (GRID_SIZE / 2.0)
+					spawn_floating_text(Vector2(world_x, world_y), 500)
+
+	for x in range(line_min, line_max + 1):
+		var is_perfect_col = true
+		var col_blocks = []
+		for y in range(line_min, line_max + 1):
+			var col_block = get_block_at_rel(x, y)
+			if col_block == null:
+				is_perfect_col = false
+				break
+			col_blocks.append(col_block)
+		if is_perfect_col:
+			for b in col_blocks:
+				if not b.get("is_gold", false):
+					b["is_gold"] = true
+					newly_gold = true
+					score += 500
+					var vp_size = get_viewport_rect().size
+					var center_x = vp_size.x / 2.0
+					var world_x = center_x + (b.x * GRID_SIZE) + (GRID_SIZE / 2.0)
+					var world_y = ((CENTER_Y + b.y) * GRID_SIZE) + (GRID_SIZE / 2.0)
+					spawn_floating_text(Vector2(world_x, world_y), 500)
 					
 	if newly_gold: 
 		trigger_vfx("GOLD_COMPLETE")
@@ -344,6 +510,7 @@ func rotate_core(dir):
 	grid_board.cluster = cluster
 
 	if is_resetting or level_completed or show_results_screen: return
+	if not can_rotate_core_without_piece_overlap(dir): return
 	var new_cluster = []
 	for b in cluster:
 		var nx; var ny
@@ -590,6 +757,7 @@ func draw_endless_ui(vp):
 	# -------------------
 	
 	var pause_x = vp.x - 60; var pause_y = 20
+	btn_pause_rect = Rect2(vp.x - 70, 10, 60, 60)
 	draw_rect(Rect2(pause_x, pause_y, 10, 30), Color.WHITE, true)
 	draw_rect(Rect2(pause_x + 15, pause_y, 10, 30), Color.WHITE, true)
 	

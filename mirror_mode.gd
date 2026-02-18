@@ -1,98 +1,96 @@
 extends "res://main_game.gd"
 
-# 1. OVERRIDE DRAWING
+@export var mirror_game_levels: Array[Resource] = []
+
+func _ready():
+	if not mirror_game_levels.is_empty():
+		game_levels = mirror_game_levels.duplicate(true)
+	elif not Global.game_levels.is_empty():
+		game_levels = Global.game_levels.duplicate(true)
+	super._ready()
+
 func _draw():
 	super._draw()
-	
-	# FIX: Calculate the exact boundary line between the left (-1) and right (0) columns
-	# Previously we subtracted (GRID_SIZE/2) which moved it left. Now it is dead center.
+
+	# Mirror axis is horizontal, between relative rows -1 and 0.
 	var center_screen_x = OFFSET_X + (CENTER_X * GRID_SIZE)
+	var axis_screen_y = (CENTER_Y * GRID_SIZE)
 	var vp_size = get_viewport_rect().size
-	
-	# Draw a vertical red line
-	draw_line(Vector2(center_screen_x, 0), Vector2(center_screen_x, vp_size.y), Color.RED, 2.0)
+	var line_col = Color("ebcb8b")
+	line_col.a = 0.7
+	draw_line(Vector2(center_screen_x - 220, axis_screen_y), Vector2(center_screen_x + 220, axis_screen_y), line_col, 2.0)
 
+func get_cluster_block(rel_x, rel_y):
+	for b in cluster:
+		if b.x == rel_x and b.y == rel_y:
+			return b
+	return null
 
-# 2. OVERRIDE LANDING
+func mirror_rel_y(rel_y):
+	return -rel_y - 1
+
 func land_piece():
-	if level_completed: return 
+	if level_completed or show_results_screen:
+		return
 
 	var gy = round(falling_piece.y)
-	
-	# --- 1. COPY-PASTE THE SMART FILTER CHECKS FROM MAIN GAME ---
-	# (We have to repeat this because we are injecting logic inside the success block)
-	
-	# Check Connectivity
-	var connected = false
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				var ax = falling_piece.x + c
-				var ay = gy + r
-				if is_occupied(ax+1, ay) or is_occupied(ax-1, ay) or is_occupied(ax, ay+1) or is_occupied(ax, ay-1):
-					connected = true
-	
-	if not connected:
-		print("REJECT: Missed Core.")
-		shake_intensity = 15.0 
-		falling_piece = null
-		spawn_piece() 
+	if will_collide(falling_piece.x, gy, falling_piece.matrix):
+		handle_rejection()
 		return
-
-	# Check Height
 	if gy < 0:
-		print("REJECT: Too High.")
-		shake_intensity = 15.0
-		falling_piece = null
-		spawn_piece()
+		handle_rejection()
 		return
-		
-	# Check Targets
-	var fits_ghost = true
-	for r in range(falling_piece.matrix.size()):
-		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				var rel_x = (falling_piece.x + c) - CENTER_X
-				var rel_y = (gy + r) - CENTER_Y
-				var is_target = false
-				for t in current_level_targets:
-					if t.x == rel_x and t.y == rel_y:
-						is_target = true
-						break
-				if not is_target:
-					fits_ghost = false
-	
-	if not fits_ghost:
-		print("REJECT: Doesn't fit solution.")
-		shake_intensity = 15.0
-		falling_piece = null
-		spawn_piece() 
+	if not grid_board.piece_is_connected(falling_piece.x, gy, falling_piece.matrix):
+		handle_rejection()
 		return
 
-	# --- 2. SUCCESS: ADD NORMAL + MIRROR BLOCKS ---
+	var placements = []
+	var placement_keys = {}
 	for r in range(falling_piece.matrix.size()):
 		for c in range(falling_piece.matrix[r].size()):
-			if falling_piece.matrix[r][c] == 1:
-				var normal_pos = { 
-					"x": (falling_piece.x + c) - CENTER_X, 
-					"y": (gy + r) - CENTER_Y 
-				}
-				cluster.append(normal_pos)
-				
-				# MIRROR LOGIC:
-				# Axis is between -1 and 0. Formula: -x - 1
-				var mirror_pos = {
-					"x": -normal_pos.x - 1,
-					"y": normal_pos.y
-				}
-				
-				# Only add if it doesn't overlap an existing block
-				if not is_occupied(CENTER_X + mirror_pos.x, CENTER_Y + mirror_pos.y):
-					cluster.append(mirror_pos)
+			if falling_piece.matrix[r][c] != 1:
+				continue
+			var rel_x = (falling_piece.x + c) - CENTER_X
+			var rel_y = (gy + r) - CENTER_Y
+			var candidates = [
+				{"x": rel_x, "y": rel_y},
+				{"x": rel_x, "y": mirror_rel_y(rel_y)}
+			]
+			for pos in candidates:
+				var key = str(pos.x) + "," + str(pos.y)
+				if not placement_keys.has(key):
+					placement_keys[key] = true
+					placements.append(pos)
 
-	shake_intensity = 10.0
+	# Validate all generated placements before mutating cluster.
+	for pos in placements:
+		if get_cluster_block(pos.x, pos.y) != null:
+			handle_rejection()
+			return
+
+	last_placed_coords.clear()
+	for pos in placements:
+		cluster.append({"x": pos.x, "y": pos.y})
+		last_placed_coords.append(Vector2(CENTER_X + pos.x, CENTER_Y + pos.y))
+
+	grid_board.cluster = cluster
+	placement_flash_alpha = 1.0
+
+	var center_x = OFFSET_X + ((falling_piece.x + falling_piece.matrix[0].size() / 2.0) * GRID_SIZE)
+	var center_y = (falling_piece.y + falling_piece.matrix.size() / 2.0) * GRID_SIZE
+	spawn_impact_particles(Vector2(center_x, center_y))
+
+	score += 150
+	trigger_score_pulse()
+	spawn_floating_text(Vector2(center_x, center_y), 150)
+
+	if sfx_connect:
+		sfx_connect.play()
+	trigger_vfx("SUCCESS")
 	falling_piece = null
+	piece_mover.falling_piece = null
 	sequence_index += 1
-	
-	check_victory()
+
+	check_victory_100_percent()
 	spawn_piece()
+	trigger_spawn_burst()

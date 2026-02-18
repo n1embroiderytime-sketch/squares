@@ -30,7 +30,10 @@ func _ready():
 		$MenuContainer/BtnPlay.pressed.connect(func(): go_to_scene("res://LevelSelect.tscn"))
 	
 	if has_node("MenuContainer/BtnSettings"):
-		pass
+		$MenuContainer/BtnSettings.pressed.connect(func():
+			Global.settings_return_scene = "res://MainMenu.tscn"
+			go_to_scene("res://settings_menu.tscn")
+		)
 	
 	# 2. Bouncing Title
 	if logo_container:
