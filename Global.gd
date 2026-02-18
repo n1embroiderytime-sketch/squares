@@ -9,6 +9,7 @@ func _ready():
 	game_levels = load_levels_from_folder(CLASSIC_LEVELS_PATH)
 	
 	load_game() # Your existing load function
+	call_deferred("apply_audio_settings")
 
 func load_levels_from_folder(path: String) -> Array:
 	var loaded_levels: Array = []
@@ -55,6 +56,13 @@ var level_stars = {}
 # Endless progression
 var endless_high_score = 0
 var endless_current_score = 0
+var endless_has_saved_run = false
+var endless_run_state = {}
+
+# Audio settings
+var music_volume = 0.8
+var sfx_volume = 0.8
+var settings_return_scene = "res://MainMenu.tscn"
 
 const SAVE_PATH = "user://lookmom_save.json"
 
@@ -63,7 +71,11 @@ func save_game():
 		"highest_level_reached": highest_level_reached,
 		"level_stars": level_stars,
 		"endless_high_score": endless_high_score,
-		"endless_current_score": endless_current_score
+		"endless_current_score": endless_current_score,
+		"endless_has_saved_run": endless_has_saved_run,
+		"endless_run_state": endless_run_state,
+		"music_volume": music_volume,
+		"sfx_volume": sfx_volume
 	}
 
 	var file = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -89,3 +101,32 @@ func load_game():
 				endless_high_score = int(data["endless_high_score"])
 			if "endless_current_score" in data:
 				endless_current_score = int(data["endless_current_score"])
+			if "endless_has_saved_run" in data:
+				endless_has_saved_run = bool(data["endless_has_saved_run"])
+			if "endless_run_state" in data and data["endless_run_state"] is Dictionary:
+				endless_run_state = data["endless_run_state"].duplicate(true)
+			if "music_volume" in data:
+				music_volume = clamp(float(data["music_volume"]), 0.0, 1.0)
+			if "sfx_volume" in data:
+				sfx_volume = clamp(float(data["sfx_volume"]), 0.0, 1.0)
+
+
+func volume_to_db(linear_volume):
+	if linear_volume <= 0.0001:
+		return -80.0
+	return linear_to_db(linear_volume)
+
+func get_music_db():
+	return volume_to_db(music_volume)
+
+func get_sfx_db():
+	return volume_to_db(sfx_volume)
+
+func apply_audio_settings():
+	var music_player = get_node_or_null("/root/MusicManager/AudioStreamPlayer")
+	if music_player:
+		music_player.volume_db = get_music_db()
+
+func _notification(what):
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		save_game()
