@@ -65,7 +65,7 @@ func setup_endless_mode():
 		endless_data_path = "res://Gamemodes/Endless/Level999.tres"
 	var endless_data = load(endless_data_path)
 
-	btn_endless.setup(0, endless_data, false, 0, true, Global.endless_high_score)
+	btn_endless.setup(0, endless_data, false, 0, true, Global.endless_high_score, Color("88c0d0"))
 	btn_endless.pressed.connect(func():
 		Global.selected_level = 999
 		get_tree().change_scene_to_file("res://endless_game.tscn")
@@ -81,7 +81,7 @@ func setup_classic_mode():
 
 		var btn = preload("res://LevelButton.gd").new()
 		grid_classic.add_child(btn)
-		btn.setup(i + 1, data, is_locked, stars)
+		btn.setup(i + 1, data, is_locked, stars, false, 0, Color.WHITE)
 
 		if not is_locked:
 			var lvl_idx = i
@@ -99,7 +99,7 @@ func setup_mirror_mode():
 		var data = mirror_levels[i]
 		var btn_mirror = preload("res://LevelButton.gd").new()
 		mirror_row.add_child(btn_mirror)
-		btn_mirror.setup(i + 1, data, false, 0)
+		btn_mirror.setup(i + 1, data, false, 0, false, 0, Color("bf616a"))
 		var mirror_idx = i
 		btn_mirror.pressed.connect(func():
 			Global.selected_level = mirror_idx

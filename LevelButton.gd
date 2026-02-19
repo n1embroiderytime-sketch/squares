@@ -6,6 +6,7 @@ var is_locked = false
 var stars_earned = 0
 var endless_mode = false
 var endless_high_score = 0
+var button_accent = Color.WHITE
 
 # Settings
 const BUTTON_SIZE = Vector2(150, 150)
@@ -14,13 +15,14 @@ const FONT_PATH = "res://Fonts/Kenney Mini Square Mono.ttf"
 
 var ui_font = ThemeDB.fallback_font
 
-func setup(idx, data, locked, stars, is_endless := false, high_score := 0):
+func setup(idx, data, locked, stars, is_endless := false, high_score := 0, accent := Color.WHITE):
 	level_index = idx
 	level_data = data
 	is_locked = locked
 	stars_earned = stars
 	endless_mode = is_endless
 	endless_high_score = high_score
+	button_accent = accent
 
 	custom_minimum_size = BUTTON_SIZE
 	size = BUTTON_SIZE
@@ -41,14 +43,14 @@ func setup(idx, data, locked, stars, is_endless := false, high_score := 0):
 func _draw():
 	var center = size / 2
 
-	var bg_col = Color("2e3440")
+	var bg_col = Color(0.04, 0.04, 0.04, 0.12)
 	if is_locked:
-		bg_col = Color("15171c")
+		bg_col = Color(0.04, 0.04, 0.04, 0.05)
 	draw_rect(Rect2(Vector2.ZERO, size), bg_col, true)
 
-	var border_col = Color("4c566a")
+	var border_col = button_accent
 	if is_locked:
-		border_col = Color("2e3440")
+		border_col = Color(button_accent.r, button_accent.g, button_accent.b, 0.3)
 	draw_rect(Rect2(Vector2.ZERO, size), border_col, false, 2.0)
 
 	if level_data and "target_slots" in level_data and not level_data.target_slots.is_empty():
@@ -83,7 +85,7 @@ func _draw():
 	if not is_locked:
 		if endless_mode:
 			var score_label = "HI " + str(endless_high_score)
-			draw_string(ui_font, Vector2(size.x / 2.0, size.y - 12), score_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 16, Color("88c0d0"))
+			draw_string(ui_font, Vector2(size.x / 2.0, size.y - 12), score_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 16, button_accent)
 		else:
 			var star_size = 12
 			var gap = 4
@@ -99,7 +101,7 @@ func _draw():
 	if is_locked:
 		draw_string(ui_font, center + Vector2(0, 5), "LOCKED", HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(1, 1, 1, 0.4))
 
-	var num_col = Color(1, 1, 1, 0.2) if is_locked else Color(1, 1, 1, 0.5)
+	var num_col = Color(1, 1, 1, 0.2) if is_locked else Color(button_accent.r, button_accent.g, button_accent.b, 0.7)
 	draw_string(ui_font, Vector2(8, 24), str(level_index), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, num_col)
 
 func _on_hover():

@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://bxik04jeq87g4"]
+[gd_scene load_steps=12 format=3 uid="uid://bxik04jeq87g4"]
 
 [ext_resource type="Script" uid="uid://16okybqcsbqy" path="res://level_select.gd" id="1_ardn0"]
 [ext_resource type="Resource" uid="uid://dymai6sqjh4o1" path="res://Gamemodes/Classic/Level010.tres" id="2_b3bbf"]
@@ -10,7 +10,23 @@
 [ext_resource type="Resource" uid="uid://bbrneg8cocsiw" path="res://Gamemodes/Classic/Level015.tres" id="7_b3bbf"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_w5tpn"]
-bg_color = Color(0, 0, 0, 1)
+bg_color = Color(0.04, 0.04, 0.04, 0.2)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_back_normal"]
+bg_color = Color(0.04, 0.04, 0.04, 0.12)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_back_hover"]
+bg_color = Color(0.04, 0.04, 0.04, 0.2)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -64,7 +80,10 @@ theme_override_constants/separation = 20
 layout_mode = 2
 theme_override_constants/outline_size = 2
 theme_override_fonts/font = ExtResource("2_q3t17")
-theme_override_styles/hover = SubResource("StyleBoxFlat_w5tpn")
+theme_override_styles/normal = SubResource("StyleBoxFlat_back_normal")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_w5tpn")
+theme_override_styles/hover = SubResource("StyleBoxFlat_back_hover")
+theme_override_styles/focus = SubResource("StyleBoxFlat_back_hover")
 text = " << "
 
 [node name="Label" type="Label" parent="MainMargin/LayoutList/HeaderArea/HBoxContainer"]
@@ -80,7 +99,7 @@ layout_mode = 2
 
 [node name="TitleEndless" type="Label" parent="MainMargin/LayoutList/SectionEndless"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
 theme_override_fonts/font = ExtResource("2_q3t17")
 theme_override_font_sizes/font_size = 20
 text = "ENDLESS"
@@ -119,7 +138,7 @@ layout_mode = 2
 
 [node name="TitleMirror" type="Label" parent="MainMargin/LayoutList/SectionMirror"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_color = Color(0.749, 0.38, 0.416, 1)
 theme_override_fonts/font = ExtResource("2_q3t17")
 theme_override_font_sizes/font_size = 20
 text = "MIRROR"

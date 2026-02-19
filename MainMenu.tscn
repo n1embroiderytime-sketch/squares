@@ -4,68 +4,44 @@
 [ext_resource type="FontFile" uid="uid://c2b52yvaanjc7" path="res://Fonts/Kenney Mini Square Mono.ttf" id="2_eiy7p"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_h7a2f"]
-bg_color = Color(0.04, 0.04, 0.04, 0.12)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(1, 1, 1, 1)
+bg_color = Color(18.892157, 18.892157, 18.892157, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_iwfq2"]
-bg_color = Color(0.04, 0.04, 0.04, 0.2)
+bg_color = Color(0, 0, 0, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(1, 1, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_7r1g0"]
-bg_color = Color(0.04, 0.04, 0.04, 0.16)
+bg_color = Color(0, 0, 0, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(1, 1, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_e2xy7"]
-bg_color = Color(0.04, 0.04, 0.04, 0.2)
+bg_color = Color(0, 0, 0, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(1, 1, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_cqjrg"]
-bg_color = Color(0.04, 0.04, 0.04, 0.12)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(1, 1, 1, 1)
+bg_color = Color(0, 0, 0, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_eiy7p"]
-bg_color = Color(0.04, 0.04, 0.04, 0.12)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.45, 0.8, 1, 1)
+bg_color = Color(1, 1, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_fimr5"]
-bg_color = Color(0.04, 0.04, 0.04, 0.16)
+bg_color = Color(0, 0, 0, 1)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.45, 0.8, 1, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_u7cqb"]
-bg_color = Color(0.04, 0.04, 0.04, 0.12)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.45, 0.8, 1, 1)
+bg_color = Color(0, 0, 0, 1)
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -117,7 +93,7 @@ text = " SQUARES!
 
 [node name="BtnPlay" type="Button" parent="MenuContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_colors/font_focus_color = Color(1, 1, 1, 1)
 theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
 theme_override_fonts/font = ExtResource("2_eiy7p")
@@ -131,7 +107,7 @@ text = "  PLAY ▶"
 
 [node name="BtnSettings" type="Button" parent="MenuContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.45, 0.8, 1, 1)
+theme_override_colors/font_color = Color(0, 0, 0, 1)
 theme_override_fonts/font = ExtResource("2_eiy7p")
 theme_override_font_sizes/font_size = 25
 theme_override_styles/normal = SubResource("StyleBoxFlat_eiy7p")
